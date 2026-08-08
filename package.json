@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test fork/test/**/*.test.js"
+    "test": "node --test \"fork/test/**/*.test.js\""
   },
   "dependencies": {
     "yaml": "2.6.1"
