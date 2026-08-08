@@ -1,0 +1,12 @@
+{
+  "name": "coolify-fork-tooling",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test fork/test/**/*.test.js"
+  },
+  "dependencies": {
+    "yaml": "2.6.1"
+  }
+}

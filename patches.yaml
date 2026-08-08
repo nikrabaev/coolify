@@ -1,0 +1,12 @@
+# Applied in file order onto the newest upstream v4.x.y tag.
+#
+# type: pr     -> an upstream pull request. `sha` is MANDATORY and is a trust
+#                 statement: a human reviewed exactly this commit. The build
+#                 merges the pin, never the live head.
+# type: branch -> a branch in this repository (inside the trust boundary).
+base: latest-tag
+patches:
+  - id: cdn-hardening
+    type: branch
+    ref: patch/fork-cdn-hardening
+    reason: repoint upgrade.sh CDN, versioned release paths, fail-fast downloads
