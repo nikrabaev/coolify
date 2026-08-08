@@ -1,6 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
 import { deriveVersionsJson, parseCdnUrls, patchConstantsVersion } from '../bin/release.mjs'
+
+// Points outside this repository (the upstream-sync worktree). Update this
+// path if that worktree moves; the test skips cleanly when it's absent.
+const REAL_CONSTANTS_PHP_PATH =
+  '/Users/nikrabaev/Work/oss/coolify/.claude/worktrees/coolify-fork-upstream-sync-42951e/config/constants.php'
 
 const UPSTREAM_VERSIONS = JSON.stringify(
   {
@@ -40,6 +46,42 @@ test('patches the coolify version in constants.php without touching helper_versi
 
 test('throws if the constants version line is not found', () => {
   assert.throws(() => patchConstantsVersion('<?php return [];', '4.2.0.1'), /version line not found/)
+})
+
+test('patches only the top-level coolify.version, not a version key nested inside a sub-array', () => {
+  const php =
+    `<?php\n\nreturn [\n` +
+    `    'coolify' => [\n` +
+    `        'some_nested' => [ 'version' => 'nested-should-not-match' ],\n` +
+    `        'version' => '4.2.0',\n` +
+    `        'helper_version' => '1.0.14',\n` +
+    `    ],\n` +
+    `];\n`
+  const out = patchConstantsVersion(php, '9.9.9')
+  assert.match(out, /'coolify' => \[[\s\S]*'version' => '9\.9\.9'/)
+  assert.match(out, /'nested-should-not-match'/)
+})
+
+test('writes a version containing regex replacement patterns literally', () => {
+  const php = `<?php\n\nreturn [\n    'coolify' => [\n        'version' => '4.2.0',\n        'helper_version' => '1.0.14',\n    ],\n];\n`
+  const out = patchConstantsVersion(php, '4.2.0$1-weird$&')
+  assert.match(out, /'version' => '4\.2\.0\$1-weird\$&'/)
+  assert.match(out, /'helper_version' => '1\.0\.14'/)
+})
+
+test('patches the real upstream constants.php, leaving sibling version keys untouched', { skip: !existsSync(REAL_CONSTANTS_PHP_PATH) }, () => {
+  const original = readFileSync(REAL_CONSTANTS_PHP_PATH, 'utf8')
+  const out = patchConstantsVersion(original, '4.2.0.1')
+  assert.match(out, /'coolify' => \[[\s\S]*?'version' => '4\.2\.0\.1'/)
+
+  const helperMatch = original.match(/'helper_version'\s*=>\s*'([^']*)'/)
+  const realtimeMatch = original.match(/'realtime_version'\s*=>\s*'([^']*)'/)
+  const railpackMatch = original.match(/'railpack_version'\s*=>\s*'([^']*)'/)
+  assert.ok(helperMatch && realtimeMatch && railpackMatch, 'expected version keys present in real file')
+
+  assert.match(out, new RegExp(`'helper_version' => '${helperMatch[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`))
+  assert.match(out, new RegExp(`'realtime_version' => '${realtimeMatch[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`))
+  assert.match(out, new RegExp(`'railpack_version' => '${railpackMatch[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`))
 })
 
 test('extracts every CDN path the upgrade script requests', () => {

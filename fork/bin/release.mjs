@@ -18,7 +18,54 @@ export function deriveVersionsJson(builtVersionsJson, version) {
   return `${JSON.stringify(data, null, 4)}\n`
 }
 
-const CONSTANTS_VERSION = /('coolify'\s*=>\s*\[[\s\S]*?'version'\s*=>\s*')([^']+)(')/
+const COOLIFY_ARRAY_OPEN = /'coolify'\s*=>\s*\[/
+const VERSION_KEY = /'version'\s*=>\s*'([^']*)'/yd
+
+/**
+ * Find the `'version' => '...'` entry that sits directly inside the
+ * `'coolify' => [ ... ]` array — not one nested inside a sub-array of it.
+ * A plain non-greedy regex can't express "at this nesting depth", so this
+ * walks the block character by character tracking bracket depth and only
+ * attempts the version match while depth === 1 (i.e. still directly inside
+ * the coolify array, not inside one of its nested arrays).
+ *
+ * @param {string} constantsPhp
+ * @returns {{start: number, end: number} | null} byte offsets of the
+ *   version value (excluding the surrounding quotes), or null if no
+ *   top-level version entry exists inside the coolify array.
+ */
+function findTopLevelCoolifyVersion(constantsPhp) {
+  const openMatch = COOLIFY_ARRAY_OPEN.exec(constantsPhp)
+  if (!openMatch) {
+    return null
+  }
+
+  const bodyStart = openMatch.index + openMatch[0].length
+  let depth = 1
+
+  for (let i = bodyStart; i < constantsPhp.length && depth > 0; i++) {
+    const ch = constantsPhp[i]
+    if (ch === '[') {
+      depth++
+      continue
+    }
+    if (ch === ']') {
+      depth--
+      continue
+    }
+    if (depth !== 1) {
+      continue
+    }
+    VERSION_KEY.lastIndex = i
+    const m = VERSION_KEY.exec(constantsPhp)
+    if (m && m.index === i) {
+      const [start, end] = m.indices[1]
+      return { start, end }
+    }
+  }
+
+  return null
+}
 
 /**
  * @param {string} constantsPhp contents of config/constants.php
@@ -26,10 +73,11 @@ const CONSTANTS_VERSION = /('coolify'\s*=>\s*\[[\s\S]*?'version'\s*=>\s*')([^']+
  * @returns {string}
  */
 export function patchConstantsVersion(constantsPhp, version) {
-  if (!CONSTANTS_VERSION.test(constantsPhp)) {
+  const match = findTopLevelCoolifyVersion(constantsPhp)
+  if (!match) {
     throw new Error('constants.php: coolify version line not found')
   }
-  return constantsPhp.replace(CONSTANTS_VERSION, `$1${version}$3`)
+  return constantsPhp.slice(0, match.start) + version + constantsPhp.slice(match.end)
 }
 
 const CDN_URL = /\$\{?CDN\}?\/([A-Za-z0-9._${}/-]+)/g
