@@ -15,3 +15,17 @@ export function git(args, cwd) {
     throw new Error(`git ${args.join(' ')} failed: ${err.message}\n${stderr}`)
   }
 }
+
+/**
+ * @param {string} ref
+ * @param {string} cwd
+ * @returns {boolean} whether `ref` resolves to an existing commit object
+ */
+export function refExists(ref, cwd) {
+  try {
+    git(['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], cwd)
+    return true
+  } catch {
+    return false
+  }
+}
