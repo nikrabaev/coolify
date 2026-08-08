@@ -62,6 +62,67 @@ test('patches only the top-level coolify.version, not a version key nested insid
   assert.match(out, /'nested-should-not-match'/)
 })
 
+test('patches the real top-level version even when a stray "[" inside a string value inflates naive bracket depth', () => {
+  const php =
+    `<?php\n\nreturn [\n` +
+    `    'coolify' => [\n` +
+    `        'note' => 'bracket opens here [',\n` +
+    `        'version' => '4.2.0',        // real one -- left untouched\n` +
+    `        'helper_version' => '1.0.14',\n` +
+    `    ],\n` +
+    `    'version' => 'SPURIOUS',         // silently rewritten instead\n` +
+    `];\n`
+  const out = patchConstantsVersion(php, '9.9.9')
+  assert.match(out, /'coolify' => \[[\s\S]*'version' => '9\.9\.9'/)
+  assert.match(out, /'version' => 'SPURIOUS'/)
+})
+
+test('patches the real top-level version even when a "]" inside a string value deflates naive bracket depth', () => {
+  const php =
+    `<?php\n\nreturn [\n` +
+    `    'coolify' => [\n` +
+    `        'note' => 'bracket closes here ]',\n` +
+    `        'version' => '4.2.0',\n` +
+    `        'helper_version' => '1.0.14',\n` +
+    `    ],\n` +
+    `    'version' => 'SPURIOUS',\n` +
+    `];\n`
+  const out = patchConstantsVersion(php, '9.9.9')
+  assert.match(out, /'coolify' => \[[\s\S]*'version' => '9\.9\.9'/)
+  assert.match(out, /'version' => 'SPURIOUS'/)
+})
+
+test('ignores brackets inside // and /* */ comments between keys in the coolify block', () => {
+  const php =
+    `<?php\n\nreturn [\n` +
+    `    'coolify' => [\n` +
+    `        // a stray comment with brackets: [ [ [ ]\n` +
+    `        /* another one with brackets: [ ] [ ] */\n` +
+    `        'version' => '4.2.0',\n` +
+    `        'helper_version' => '1.0.14',\n` +
+    `    ],\n` +
+    `    'version' => 'SPURIOUS',\n` +
+    `];\n`
+  const out = patchConstantsVersion(php, '9.9.9')
+  assert.match(out, /'coolify' => \[[\s\S]*'version' => '9\.9\.9'/)
+  assert.match(out, /'version' => 'SPURIOUS'/)
+})
+
+test('handles an escaped quote followed by a bracket without terminating the string early', () => {
+  const php =
+    `<?php\n\nreturn [\n` +
+    `    'coolify' => [\n` +
+    `        'note' => 'it\\'s [ here',\n` +
+    `        'version' => '4.2.0',\n` +
+    `        'helper_version' => '1.0.14',\n` +
+    `    ],\n` +
+    `    'version' => 'SPURIOUS',\n` +
+    `];\n`
+  const out = patchConstantsVersion(php, '9.9.9')
+  assert.match(out, /'coolify' => \[[\s\S]*'version' => '9\.9\.9'/)
+  assert.match(out, /'version' => 'SPURIOUS'/)
+})
+
 test('writes a version containing regex replacement patterns literally', () => {
   const php = `<?php\n\nreturn [\n    'coolify' => [\n        'version' => '4.2.0',\n        'helper_version' => '1.0.14',\n    ],\n];\n`
   const out = patchConstantsVersion(php, '4.2.0$1-weird$&')
