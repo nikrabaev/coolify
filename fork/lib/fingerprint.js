@@ -36,6 +36,11 @@ function isHashedWorkflowFile(path) {
  * CI writes makes every successful run perturb its own fingerprint, so the
  * next scheduled run rebuilds an identical release, forever.
  *
+ * Note: blob SHAs reflect committed and staged content (Git index), not
+ * working-tree bytes. This is intentional: CI fingerprints a clean checkout
+ * where index matches working tree. Locally, unstaged edits to hashed files
+ * won't affect the fingerprint until staged.
+ *
  * @param {string} root repository root
  * @returns {Map<string,string>} relative path -> git blob SHA (an opaque
  *   content hash; `computeFingerprint` never needs the file's bytes)
