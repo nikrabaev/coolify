@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { collectToolingFiles, computeFingerprint } from '../lib/fingerprint.js'
@@ -72,4 +72,63 @@ test('INVARIANT: writing CI state does not change the fingerprint', () => {
   writeFileSync(join(root, 'state/rr-cache/abcdef/preimage'), 'conflict\n')
 
   assert.equal(computeFingerprint(inputs()), before)
+})
+
+test('SECURITY: a symlink under the hashed tree throws, naming the offending path (does not smuggle state/ content into the hash)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'fp-'))
+  try {
+    mkdirSync(join(root, 'fork'), { recursive: true })
+    mkdirSync(join(root, 'state'), { recursive: true })
+    writeFileSync(join(root, 'state/secret.json'), '{"leak":true}\n')
+    // Mirrors the reviewer's repro: a symlink under fork/ pointing at state/.
+    symlinkSync(join(root, 'state/secret.json'), join(root, 'fork/leak.json'))
+
+    assert.throws(() => collectToolingFiles(root), /fork\/leak\.json/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('SECURITY: crafted tab/newline id no longer reproduces the preimage of a different two-entry branchShas map', () => {
+  const shaA = 'a'.repeat(40)
+  const shaB = 'b'.repeat(40)
+  const twoEntries = { ...BASE, branchShas: new Map([['a', shaA], ['b', shaB]]) }
+
+  // Under the old unescaped `branch\t${id}\t${sha}\n` format, this single
+  // entry's preimage line is byte-for-byte identical to the two lines
+  // produced by `twoEntries` above (id embeds a tab + `\n` + the literal
+  // text of the second line).
+  const craftedId = `a\t${shaA}\nbranch\tb`
+  const collidingSingleEntry = { ...BASE, branchShas: new Map([[craftedId, shaB]]) }
+
+  assert.notEqual(computeFingerprint(twoEntries), computeFingerprint(collidingSingleEntry))
+})
+
+test('a dangling symlink among real files throws instead of silently truncating the file list', () => {
+  const root = mkdtempSync(join(tmpdir(), 'fp-'))
+  try {
+    mkdirSync(join(root, 'fork'), { recursive: true })
+    writeFileSync(join(root, 'fork/a.js'), 'export const a = 1\n')
+    // Sorts between a.js and c.js so a.js is collected before the walk hits it.
+    symlinkSync(join(root, 'fork/does-not-exist.js'), join(root, 'fork/broken-link'))
+    writeFileSync(join(root, 'fork/c.js'), 'export const c = 1\n')
+
+    assert.throws(() => collectToolingFiles(root))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('a genuinely missing top-level hashed directory is still tolerated', () => {
+  const root = mkdtempSync(join(tmpdir(), 'fp-'))
+  try {
+    mkdirSync(join(root, '.github/workflows'), { recursive: true })
+    writeFileSync(join(root, '.github/workflows/fork-sync.yml'), 'name: fork-sync\n')
+    // Deliberately no `fork/` directory at all.
+
+    const files = collectToolingFiles(root)
+    assert.deepEqual([...files.keys()], ['.github/workflows/fork-sync.yml'])
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })

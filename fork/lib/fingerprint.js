@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { lstatSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
 
 const HASHED_DIRS = ['fork']
@@ -13,11 +13,28 @@ function sha256(value) {
 function walk(dir, root, out) {
   for (const name of readdirSync(dir).sort()) {
     const full = join(dir, name)
-    if (statSync(full).isDirectory()) {
+    const stat = lstatSync(full)
+    if (stat.isSymbolicLink()) {
+      throw new Error(
+        `fingerprint: symlinks are not permitted inside the fingerprinted tree: ${relative(root, full).split(sep).join('/')}`
+      )
+    }
+    if (stat.isDirectory()) {
       walk(full, root, out)
     } else {
       out.set(relative(root, full).split(sep).join('/'), readFileSync(full, 'utf8'))
     }
+  }
+}
+
+function dirExists(path) {
+  try {
+    return statSync(path).isDirectory()
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      return false
+    }
+    throw err
   }
 }
 
@@ -34,24 +51,17 @@ function walk(dir, root, out) {
 export function collectToolingFiles(root) {
   const files = new Map()
   for (const dir of HASHED_DIRS) {
-    try {
-      walk(join(root, dir), root, files)
-    } catch (err) {
-      if (err.code !== 'ENOENT') {
-        throw err
-      }
+    const full = join(root, dir)
+    if (dirExists(full)) {
+      walk(full, root, files)
     }
   }
-  try {
+  if (dirExists(join(root, HASHED_WORKFLOW_DIR))) {
     for (const name of readdirSync(join(root, HASHED_WORKFLOW_DIR)).sort()) {
       if (name.startsWith(HASHED_WORKFLOW_PREFIX) && name.endsWith('.yml')) {
         const rel = `${HASHED_WORKFLOW_DIR}/${name}`
         files.set(rel, readFileSync(join(root, rel), 'utf8'))
       }
-    }
-  } catch (err) {
-    if (err.code !== 'ENOENT') {
-      throw err
     }
   }
   return files
@@ -68,10 +78,10 @@ export function computeFingerprint({ baseTag, baseSha, manifestText, branchShas,
   h.update(`base\t${baseTag}\t${baseSha}\n`)
   h.update(`manifest\t${sha256(manifestText)}\n`)
   for (const [id, sha] of [...branchShas].sort((a, b) => a[0].localeCompare(b[0]))) {
-    h.update(`branch\t${id}\t${sha}\n`)
+    h.update(`branch\t${sha256(id)}\t${sha}\n`)
   }
   for (const [path, content] of [...toolingFiles].sort((a, b) => a[0].localeCompare(b[0]))) {
-    h.update(`tool\t${path}\t${sha256(content)}\n`)
+    h.update(`tool\t${sha256(path)}\t${sha256(content)}\n`)
   }
   return h.digest('hex')
 }
