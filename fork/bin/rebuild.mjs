@@ -93,7 +93,13 @@ export function rebuild({ cwd, manifest, upstreamRemote, forkRemote, baseTag }) 
       } catch {
         conflicts = '(unavailable)'
       }
-      git(['merge', '--abort'], cwd)
+      try {
+        git(['merge', '--abort'], cwd)
+      } catch {
+        // Best-effort: some merge failures (e.g. an untracked file that would
+        // be overwritten) never create MERGE_HEAD, so the abort itself fails.
+        // That failure must never displace the informative error below.
+      }
       throw new Error(`${entry.id}: conflict merging ${sha}\nConflicting paths:\n${conflicts}\n${err.message}`)
     }
     results.push({ id: entry.id, outcome: 'merged' })
