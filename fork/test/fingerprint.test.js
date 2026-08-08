@@ -132,3 +132,50 @@ test('a genuinely missing top-level hashed directory is still tolerated', () => 
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('SECURITY: a symlinked fork/ pointing outside the fingerprinted tree throws (top-level entry point)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'fp-'))
+  try {
+    // A sibling directory standing in for "somewhere outside the repo",
+    // reachable only because `fork` itself is a symlink to it.
+    const outside = join(root, 'outside-fork')
+    mkdirSync(outside, { recursive: true })
+    writeFileSync(join(outside, 'secret.js'), 'export const leak = true\n')
+    symlinkSync(outside, join(root, 'fork'))
+
+    assert.throws(() => collectToolingFiles(root), /fork/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('SECURITY: a symlinked fork-*.yml workflow file throws instead of being read directly', () => {
+  const root = mkdtempSync(join(tmpdir(), 'fp-'))
+  try {
+    mkdirSync(join(root, 'fork'), { recursive: true })
+    mkdirSync(join(root, '.github/workflows'), { recursive: true })
+    mkdirSync(join(root, 'state'), { recursive: true })
+    writeFileSync(join(root, 'state/secret.json'), '{"leak":true}\n')
+    symlinkSync(join(root, 'state/secret.json'), join(root, '.github/workflows/fork-leak.yml'))
+
+    assert.throws(() => collectToolingFiles(root), /fork-leak\.yml/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('SECURITY: a symlinked .github/workflows directory throws before it is listed', () => {
+  const root = mkdtempSync(join(tmpdir(), 'fp-'))
+  try {
+    mkdirSync(join(root, 'fork'), { recursive: true })
+    const outsideWorkflows = join(root, 'outside-workflows')
+    mkdirSync(outsideWorkflows, { recursive: true })
+    writeFileSync(join(outsideWorkflows, 'fork-leak.yml'), 'name: fork-leak\n')
+    mkdirSync(join(root, '.github'), { recursive: true })
+    symlinkSync(outsideWorkflows, join(root, '.github/workflows'))
+
+    assert.throws(() => collectToolingFiles(root), /\.github\/workflows/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

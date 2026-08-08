@@ -10,6 +10,24 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex')
 }
 
+/**
+ * Reject a path that is itself a symlink, using the same loud error the
+ * recursive walk raises for symlinks discovered mid-traversal. This must be
+ * called on every path this module reads or descends into *before* any
+ * symlink-following call (`statSync`, `readdirSync`, `readFileSync`), since
+ * entry points aren't covered by `walk()`'s own internal check.
+ *
+ * @param {string} path absolute path to check
+ * @param {string} root repository root, for relativizing the error message
+ */
+function assertNotSymlink(path, root) {
+  if (lstatSync(path).isSymbolicLink()) {
+    throw new Error(
+      `fingerprint: symlinks are not permitted inside the fingerprinted tree: ${relative(root, path).split(sep).join('/')}`
+    )
+  }
+}
+
 function walk(dir, root, out) {
   for (const name of readdirSync(dir).sort()) {
     const full = join(dir, name)
@@ -27,8 +45,9 @@ function walk(dir, root, out) {
   }
 }
 
-function dirExists(path) {
+function dirExists(path, root) {
   try {
+    assertNotSymlink(path, root)
     return statSync(path).isDirectory()
   } catch (err) {
     if (err.code === 'ENOENT') {
@@ -52,15 +71,18 @@ export function collectToolingFiles(root) {
   const files = new Map()
   for (const dir of HASHED_DIRS) {
     const full = join(root, dir)
-    if (dirExists(full)) {
+    if (dirExists(full, root)) {
       walk(full, root, files)
     }
   }
-  if (dirExists(join(root, HASHED_WORKFLOW_DIR))) {
-    for (const name of readdirSync(join(root, HASHED_WORKFLOW_DIR)).sort()) {
+  const workflowDir = join(root, HASHED_WORKFLOW_DIR)
+  if (dirExists(workflowDir, root)) {
+    for (const name of readdirSync(workflowDir).sort()) {
       if (name.startsWith(HASHED_WORKFLOW_PREFIX) && name.endsWith('.yml')) {
         const rel = `${HASHED_WORKFLOW_DIR}/${name}`
-        files.set(rel, readFileSync(join(root, rel), 'utf8'))
+        const full = join(root, rel)
+        assertNotSymlink(full, root)
+        files.set(rel, readFileSync(full, 'utf8'))
       }
     }
   }
