@@ -1,0 +1,112 @@
+name: fork-sync
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  push:
+    branches: [fork-main]
+  workflow_dispatch:
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  probe:
+    # UNPRIVILEGED. Reads upstream PR state and reports. No secrets, no
+    # credentials, and nothing from an unpinned PR head is ever executed here.
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: write # pin-update and lifecycle proposals are PR comments
+    outputs:
+      report: ${{ steps.classify.outputs.report }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fork-main
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - run: npm ci
+
+      - id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node fork/bin/probe-cli.mjs >> "$GITHUB_OUTPUT"
+
+  release:
+    # PRIVILEGED. Consumes only reviewed, pinned SHAs from patches.yaml.
+    needs: probe
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: fork-main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - run: npm ci
+
+      - name: Verify fingerprint purity invariant
+        run: npm test
+
+      - name: Restore rerere cache
+        run: |
+          mkdir -p .git/rr-cache
+          cp -r state/rr-cache/. .git/rr-cache/ 2>/dev/null || true
+          git config rerere.enabled true
+
+      - name: Resolve base tag and fingerprint
+        id: fp
+        run: node fork/bin/fingerprint-cli.mjs
+
+      - name: Mirror v4.x from upstream
+        run: |
+          # fingerprint-cli guarantees an `upstream` remote exists (it adds one
+          # by URL when missing). `origin` is the fork: actions/checkout made it so.
+          git fetch --quiet upstream v4.x
+          git push --quiet origin refs/remotes/upstream/v4.x:refs/heads/v4.x
+
+      - name: Stop if nothing changed
+        if: steps.fp.outputs.changed != 'true'
+        run: echo "Fingerprint unchanged; nothing to build."
+
+      - name: Create build worktree
+        if: steps.fp.outputs.changed == 'true'
+        # fork-main's tracked files (fork/, patches.yaml) would vanish from the
+        # working tree if we checked out prod-next in place. The build happens
+        # in a linked worktree instead; the object store and rerere cache are
+        # shared, and the tooling stays available at the workspace root.
+        run: git worktree add .build "${{ steps.fp.outputs.base_sha }}"
+
+      - name: Rebuild prod-next
+        if: steps.fp.outputs.changed == 'true'
+        working-directory: .build
+        run: node "$GITHUB_WORKSPACE/fork/bin/rebuild.mjs" "${{ steps.fp.outputs.base_tag }}" "$GITHUB_WORKSPACE/patches.yaml"
+
+      - uses: shivammathur/setup-php@v2
+        if: steps.fp.outputs.changed == 'true'
+        with:
+          php-version: '8.4'
+
+      - name: Correctness gate
+        if: steps.fp.outputs.changed == 'true'
+        working-directory: .build
+        run: |
+          composer install --no-interaction --prefer-dist --no-progress
+          vendor/bin/pint --test
+          php artisan test --compact
