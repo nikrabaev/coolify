@@ -210,6 +210,13 @@ const CDN_URL = /\$\{?CDN\}?\/([A-Za-z0-9._${}/-]+)/g
  * Extract every path the upgrade script fetches from the CDN, so the release
  * gate can assert each one maps to a published artifact.
  *
+ * This matches the script's literal source text, so it only sees paths written
+ * as `$CDN/...` or `${CDN}/...` directly. A path assembled through an
+ * intermediate shell variable is NOT detected, and the omission is silent —
+ * the gate would then verify fewer artifacts and still pass. `scripts/upgrade.sh`
+ * on `patch/fork-cdn-hardening` carries a matching comment warning against that
+ * refactor. Revisit this coupling before relying on the gate for new artifacts.
+ *
  * @param {string} upgradeScript
  * @returns {string[]} unique path suffixes, in first-seen order
  */
