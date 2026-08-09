@@ -115,3 +115,28 @@ jobs:
           composer install --no-interaction --prefer-dist --no-progress
           vendor/bin/pint --test
           php artisan test --compact
+
+      - name: Escalate on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          BASE_TAG: ${{ steps.fp.outputs.base_tag }}
+        run: |
+          gh issue create \
+            --repo "${{ github.repository }}" \
+            --title "fork-sync failed on ${BASE_TAG}" \
+            --label fork-sync \
+            --body "$(printf '%s\n' \
+              "The scheduled fork-sync run failed." \
+              "" \
+              "- base tag: \`${BASE_TAG}\`" \
+              "- run: ${RUN_URL}" \
+              "" \
+              "Reproduce locally:" \
+              '```bash' \
+              "git fetch upstream --tags" \
+              "node fork/bin/rebuild.mjs ${BASE_TAG}" \
+              '```' \
+              "" \
+              "Resolve with @claude on this issue, or a local session. \`patches.yaml\` is never changed automatically.")"
