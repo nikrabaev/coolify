@@ -69,6 +69,10 @@ fetch_artifact() {
     fi
 }
 
+# Keep "${CDN}/..." written out literally at every call site. The release gate
+# extracts these paths by regex (parseCdnUrls, fork/bin/release.mjs on fork-main)
+# to check each artifact was published; routing them through an intermediate
+# variable makes the gate match fewer paths and pass while an artifact is missing.
 fetch_artifact "${CDN}/releases/${LATEST_IMAGE}/docker-compose.yml" /data/coolify/source/docker-compose.yml
 fetch_artifact "${CDN}/releases/${LATEST_IMAGE}/docker-compose.prod.yml" /data/coolify/source/docker-compose.prod.yml
 fetch_artifact "${CDN}/releases/${LATEST_IMAGE}/.env.production" /data/coolify/source/.env.production
