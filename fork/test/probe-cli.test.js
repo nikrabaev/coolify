@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { classifyPrEntries } from '../bin/probe.mjs'
-import { buildProposals, composeIssue } from '../bin/probe-cli.mjs'
+import { buildProposals, composeIssue, isAlreadyFiled } from '../bin/probe-cli.mjs'
 
 const PIN = 'a'.repeat(40)
 const MOVED = 'b'.repeat(40)
@@ -30,7 +30,7 @@ test('composeIssue for merged/closed rows asks for a manual removal decision, no
   assert.doesNotMatch(body, /update the `sha` pin/)
 })
 
-test('buildProposals skips pinned rows and proposes one issue per non-pinned row', () => {
+test('buildProposals skips pinned rows and proposes nothing for an all-pinned manifest', () => {
   const patches = [entry]
   const states = new Map([[7, { state: 'open', merged: false, headSha: PIN }]])
   const report = classifyPrEntries(patches, states)
@@ -67,4 +67,30 @@ test('buildProposals proposes one issue per non-pinned entry across a mixed mani
     proposals.map((p) => [p.id, p.status]),
     [['m', 'merged']],
   )
+})
+
+test('isAlreadyFiled matches an exact title only, not a near-miss', () => {
+  const title = 'patches.yaml: PR #7 is head-moved'
+  const existingTitles = [title]
+
+  assert.equal(isAlreadyFiled(existingTitles, title), true)
+  assert.equal(isAlreadyFiled(existingTitles, title.toUpperCase()), false)
+  assert.equal(isAlreadyFiled(existingTitles, `${title} `), false)
+  // A search-based check (`in:title`) would token-match this as a hit even
+  // though it is a different proposal for a different PR; exact equality
+  // must not.
+  assert.equal(isAlreadyFiled(existingTitles, 'patches.yaml: PR #7 is head-moved and more'), false)
+  assert.equal(isAlreadyFiled(existingTitles, 'PR #7 is head-moved'), false)
+})
+
+test('isAlreadyFiled round-trips a title containing both `:` and `#`', () => {
+  const { title } = composeIssue(
+    { id: 'p', number: 7, status: 'head-moved' },
+    entry,
+    { state: 'open', merged: false, headSha: MOVED },
+  )
+
+  assert.equal(title, 'patches.yaml: PR #7 is head-moved')
+  assert.equal(isAlreadyFiled([title], title), true)
+  assert.equal(isAlreadyFiled(['some other title'], title), false)
 })

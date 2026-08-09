@@ -123,6 +123,14 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           BASE_TAG: ${{ steps.fp.outputs.base_tag }}
         run: |
+          # gh does not auto-create labels; ensure it exists idempotently
+          # before filing so a missing label never swallows this escalation.
+          # An "already exists" failure (or any other) is swallowed: this
+          # step must reach `gh issue create` regardless.
+          gh label create fork-sync \
+            --repo "${{ github.repository }}" \
+            --description "Automated fork-sync notifications" \
+            --color ededed || true
           gh issue create \
             --repo "${{ github.repository }}" \
             --title "fork-sync failed on ${BASE_TAG}" \

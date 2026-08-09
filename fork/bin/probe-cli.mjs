@@ -72,17 +72,71 @@ function prState(number) {
 }
 
 /**
- * Whether an open issue with this exact title already exists, so a repeated
- * run never files the same proposal twice.
+ * Number of open `fork-sync`-labeled issues to fetch when checking for
+ * duplicates before filing. High enough that a truncated page is
+ * exceptional, not routine, for this repo's issue volume.
  */
-function issueAlreadyOpen(title) {
-  const count = execFileSync(
+const ISSUE_LIST_LIMIT = 200
+
+/**
+ * Whether `title` exactly matches one of `existingTitles`. Exact string
+ * equality only — no substring, case-insensitive, or fuzzy matching — so a
+ * title that merely contains another as a substring is never treated as a
+ * duplicate.
+ *
+ * @param {string[]} existingTitles open issue titles already filed
+ * @param {string} title candidate proposal title
+ * @returns {boolean}
+ */
+export function isAlreadyFiled(existingTitles, title) {
+  return existingTitles.includes(title)
+}
+
+/**
+ * Fetch titles of open `fork-sync`-labeled issues, for duplicate suppression.
+ * Deterministic listing + exact-match comparison, not GitHub's search API:
+ * search tokenization cannot be trusted to phrase-match titles containing
+ * `:` and `#`, and a search-based miss or false positive on a notification
+ * path is not acceptable.
+ */
+function openForkSyncIssueTitles() {
+  const raw = execFileSync(
     'gh',
-    ['issue', 'list', '--repo', FORK_REPO, '--state', 'open',
-      '--search', `in:title "${title}"`, '--json', 'number', '-q', 'length'],
+    ['issue', 'list', '--repo', FORK_REPO, '--label', 'fork-sync', '--state', 'open',
+      '--json', 'title', '--limit', String(ISSUE_LIST_LIMIT)],
     { encoding: 'utf8' },
-  ).trim()
-  return count !== '0'
+  )
+  const issues = JSON.parse(raw)
+  if (issues.length === ISSUE_LIST_LIMIT) {
+    console.warn(
+      `gh issue list returned ${ISSUE_LIST_LIMIT} open fork-sync issues (the --limit); ` +
+      'the list may be truncated, so duplicate suppression may miss some titles.',
+    )
+  }
+  return issues.map((issue) => issue.title)
+}
+
+/**
+ * Idempotently ensure the `fork-sync` label exists. `gh` does not
+ * auto-create labels, and issue creation fails outright without it. Attempt
+ * creation and swallow an "already exists" failure; anything else is
+ * logged, not thrown, because filing issues is best-effort and must never
+ * block the pipeline.
+ */
+function ensureForkSyncLabel() {
+  try {
+    execFileSync('gh', [
+      'label', 'create', 'fork-sync',
+      '--repo', FORK_REPO,
+      '--description', 'Automated fork-sync notifications',
+      '--color', 'ededed',
+    ], { encoding: 'utf8', stdio: 'pipe' })
+  } catch (error) {
+    const message = String(error.stderr ?? error.message ?? error)
+    if (!/already exists/i.test(message)) {
+      console.warn(`could not ensure the "fork-sync" label exists: ${message}`)
+    }
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -98,17 +152,24 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const report = classifyPrEntries(manifest.patches, states)
   const proposals = buildProposals(manifest.patches, report, states)
 
+  ensureForkSyncLabel()
+  const existingTitles = openForkSyncIssueTitles()
+
   for (const { title, body } of proposals) {
-    if (issueAlreadyOpen(title)) {
+    if (isAlreadyFiled(existingTitles, title)) {
       continue
     }
-    execFileSync('gh', [
-      'issue', 'create',
-      '--repo', FORK_REPO,
-      '--title', title,
-      '--body', body,
-      '--label', 'fork-sync',
-    ], { stdio: 'inherit' })
+    try {
+      execFileSync('gh', [
+        'issue', 'create',
+        '--repo', FORK_REPO,
+        '--title', title,
+        '--body', body,
+        '--label', 'fork-sync',
+      ], { stdio: 'inherit' })
+    } catch (error) {
+      console.warn(`failed to file issue "${title}": ${error.message}`)
+    }
   }
 
   const out = `report=${JSON.stringify(report)}`
