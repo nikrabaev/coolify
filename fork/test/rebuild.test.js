@@ -245,6 +245,39 @@ test('fetches a branch entry from a fork remote and merges by the fetched sha', 
   assert.equal(git(['rev-parse', 'refs/remotes/fork-patch/ff'], dir), forkedSha)
 })
 
+test('re-resolving a fork branch after it was rewritten succeeds (force refspec)', () => {
+  // Fork patch branches are rebased onto each new upstream tag by design, so
+  // a force-push is the normal case, not an edge case. A prior run leaves a
+  // local `fork-patch/<id>` tracking ref behind; the next run must still be
+  // able to fetch a rewritten branch into that same ref rather than failing
+  // with a non-fast-forward rejection.
+  const dir = repo()
+  const fork = remoteRepo(dir)
+  git(['checkout', '-qb', 'patch/rewrite', 'v4.2.0'], fork)
+  writeFileSync(join(fork, 'v1.txt'), 'v1\n')
+  git(['add', '.'], fork)
+  git(['commit', '-qm', 'v1'], fork)
+  git(['remote', 'add', 'fork', fork], dir)
+
+  const manifest = { base: 'latest-tag', patches: [{ id: 'rw', type: 'branch', ref: 'patch/rewrite' }] }
+
+  // First run: establishes refs/remotes/fork-patch/rw locally.
+  rebuild({ cwd: dir, manifest, upstreamRemote: null, forkRemote: 'fork', baseTag: 'v4.2.0' })
+  const firstSha = git(['rev-parse', 'refs/remotes/fork-patch/rw'], dir)
+
+  // History rewrite on the source repository, simulating a rebase onto a
+  // new base tag: same branch name, different (non-fast-forward) history.
+  git(['commit', '--amend', '-qm', 'v1 rewritten'], fork)
+  const rewrittenSha = git(['rev-parse', 'HEAD'], fork)
+  assert.notEqual(rewrittenSha, firstSha)
+
+  // Second run, reusing the same on-disk repo and its stale local ref.
+  const { results } = rebuild({ cwd: dir, manifest, upstreamRemote: null, forkRemote: 'fork', baseTag: 'v4.2.0' })
+
+  assert.deepEqual(results, [{ id: 'rw', outcome: 'merged' }])
+  assert.equal(git(['rev-parse', 'refs/remotes/fork-patch/rw'], dir), rewrittenSha)
+})
+
 test('halts with "is not reachable" when a pinned sha is gone even after fetching', () => {
   const dir = repo()
   const upstream = remoteRepo(dir)

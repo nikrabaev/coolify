@@ -46,8 +46,15 @@ function resolveEntry(entry, { cwd, upstreamRemote, forkRemote }) {
   }
 
   if (forkRemote) {
+    // Force refspec (`+`): patch branches are rebased onto each new upstream
+    // tag by design, so a force-push is the normal case. Without `+`, a
+    // fetch that would move an existing local `fork-patch/<id>` ref
+    // non-fast-forward is rejected outright. The destination is a local
+    // remote-tracking ref that exists only to name what was fetched, and the
+    // fetched SHA is recorded and merged explicitly, so overwriting it here
+    // is safe.
     git(
-      ['fetch', '--quiet', forkRemote, `refs/heads/${entry.ref}:refs/remotes/fork-patch/${entry.id}`],
+      ['fetch', '--quiet', forkRemote, `+refs/heads/${entry.ref}:refs/remotes/fork-patch/${entry.id}`],
       cwd,
     )
     return git(['rev-parse', `refs/remotes/fork-patch/${entry.id}`], cwd)
