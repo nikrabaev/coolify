@@ -20,7 +20,11 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: read
-      pull-requests: write # pin-update and lifecycle proposals are PR comments
+      # Pin-update and PR-lifecycle proposals are filed as issues, so this must
+      # be issues: write — pull-requests: write does not grant issue creation.
+      # No contents: write on purpose: this job cannot push a branch, so it
+      # could not open a real pull request even if we wanted one.
+      issues: write
     outputs:
       report: ${{ steps.classify.outputs.report }}
     steps:
@@ -49,6 +53,7 @@ jobs:
       packages: write
       pages: write
       id-token: write
+      issues: write # failures are escalated as issues
     steps:
       - uses: actions/checkout@v5
         with:
