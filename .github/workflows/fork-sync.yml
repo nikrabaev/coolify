@@ -46,7 +46,15 @@ jobs:
 
   release:
     # PRIVILEGED. Consumes only reviewed, pinned SHAs from patches.yaml.
+    #
+    # `needs: probe` orders the jobs, but `if: !cancelled()` deliberately lets this
+    # run even when probe fails. Probe is advisory: it reports on upstream PR state
+    # and files issues, and this job consumes none of its output — the build
+    # decision comes from the fingerprint computed below. Without the override, a
+    # transient GitHub API error while probing would skip the release entirely and
+    # block every build. Probe still goes red so the failure stays visible.
     needs: probe
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
     permissions:
       contents: write
