@@ -90,12 +90,23 @@ jobs:
         id: fp
         run: node fork/bin/fingerprint-cli.mjs
 
-      - name: Mirror v4.x from upstream
+      - name: Mirror upstream's default branch
+        # Convenience only — the build is driven by release tags, never by this
+        # branch. A mirroring failure must not block a release, so this step is
+        # allowed to fail visibly rather than abort the job.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          # Resolve the branch name rather than hardcoding it: upstream renamed
+          # v4.x to main, which broke the previous hardcoded fetch. Asking for the
+          # current default survives the next rename too.
+          BRANCH=$(gh api repos/coollabsio/coolify -q .default_branch)
+          echo "mirroring upstream default branch: ${BRANCH}"
           # fingerprint-cli guarantees an `upstream` remote exists (it adds one
           # by URL when missing). `origin` is the fork: actions/checkout made it so.
-          git fetch --quiet upstream v4.x
-          git push --quiet origin refs/remotes/upstream/v4.x:refs/heads/v4.x
+          git fetch --quiet upstream "${BRANCH}"
+          git push --quiet --force origin "refs/remotes/upstream/${BRANCH}:refs/heads/${BRANCH}"
 
       - name: Stop if nothing changed
         if: steps.fp.outputs.changed != 'true'
