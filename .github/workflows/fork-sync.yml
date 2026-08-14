@@ -56,6 +56,9 @@ jobs:
     needs: probe
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
+    # actions/deploy-pages requires its job to target the github-pages
+    # environment; without this the deploy fails at runtime.
+    environment: github-pages
     permissions:
       contents: write
       packages: write
@@ -177,14 +180,20 @@ jobs:
           # bypass the versions.json pointer this design is built around.
           tags: ghcr.io/nikrabaev/coolify:${{ steps.version.outputs.version }}
 
+      # Both Pages uploads must use distinct artifact names: upload-artifact v4
+      # rejects a duplicate name within one workflow run, and this job uploads
+      # twice on purpose (versions.json is withheld from the first deploy).
       - name: Publish artifacts (versions.json withheld)
         if: steps.fp.outputs.changed == 'true'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
+          name: github-pages-artifacts
 
       - uses: actions/deploy-pages@v4
         if: steps.fp.outputs.changed == 'true'
+        with:
+          artifact_name: github-pages-artifacts
 
       - name: Verify published artifacts by content hash
         if: steps.fp.outputs.changed == 'true'
@@ -225,13 +234,17 @@ jobs:
           # versions.json becomes visible only now — it is the release pointer.
           cp versions.fork.json site/coolify/versions.json
 
-      - uses: actions/upload-pages-artifact@v3
+      - name: Publish versions.json (advertises the release)
         if: steps.fp.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: site
+          name: github-pages-advertised
 
       - uses: actions/deploy-pages@v4
         if: steps.fp.outputs.changed == 'true'
+        with:
+          artifact_name: github-pages-advertised
 
       - name: Promote :latest to the advertised release
         if: steps.fp.outputs.changed == 'true'
