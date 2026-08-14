@@ -80,6 +80,15 @@ jobs:
       - name: Verify fingerprint purity invariant
         run: npm test
 
+      - name: Configure git identity
+        # Runners have no identity configured, and this job creates commits in
+        # three places: the merge commits in rebuild, the version stamp, and the
+        # state record. Set it globally so it applies inside the .build worktree
+        # too. Local tests passed only because their fixtures set an identity.
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
       - name: Restore rerere cache
         run: |
           mkdir -p .git/rr-cache
