@@ -157,7 +157,13 @@ jobs:
           else
             echo "no PHP files changed by patches; skipping pint"
           fi
-          php artisan test --compact
+          # Browser tests (tests/v4/Browser) need Playwright, which the gate
+          # deliberately does not install — the Pest browser plugin aborts the
+          # whole run if they are discovered. Run every other suite instead of
+          # dropping tests/v4 wholesale, which would silently lose the two
+          # non-browser tests in tests/v4/Feature.
+          php artisan test --compact --testsuite=Unit,Feature
+          php artisan test --compact tests/v4/Feature
 
       - name: Allocate version and stamp it into the tree
         if: steps.fp.outputs.changed == 'true'
