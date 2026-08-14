@@ -124,6 +124,116 @@ jobs:
           vendor/bin/pint --test
           php artisan test --compact
 
+      - name: Allocate version and stamp it into the tree
+        if: steps.fp.outputs.changed == 'true'
+        id: version
+        working-directory: .build
+        env:
+          BASE_TAG: ${{ steps.fp.outputs.base_tag }}
+        run: |
+          # Fork tags are the allocation record; origin is the fork.
+          git fetch --tags --quiet origin
+          VERSION=$(node "$GITHUB_WORKSPACE/fork/bin/publish.mjs" allocate-version)
+          git commit -qam "release: ${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Assemble the Pages site
+        if: steps.fp.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          DEST_DIR: site/coolify/releases/${{ steps.version.outputs.version }}
+        run: |
+          # Every artifact comes from the built .build tree, never fork-main.
+          mkdir -p "$DEST_DIR"
+          cp .build/docker-compose.yml .build/docker-compose.prod.yml .build/.env.production "$DEST_DIR/"
+          cp .build/scripts/upgrade-postgres.sh "$DEST_DIR/"
+          cp .build/scripts/upgrade.sh site/coolify/upgrade.sh
+          # versions.json is deliberately NOT placed into site/ yet; see
+          # buildVersionsForkJson in fork/bin/publish.mjs.
+          node fork/bin/publish.mjs assemble-site
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.fp.outputs.changed == 'true'
+
+      - uses: docker/login-action@v3
+        if: steps.fp.outputs.changed == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        if: steps.fp.outputs.changed == 'true'
+        with:
+          context: .build
+          file: .build/docker/production/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/nikrabaev/coolify:${{ steps.version.outputs.version }}
+            ghcr.io/nikrabaev/coolify:latest
+
+      - name: Publish artifacts (versions.json withheld)
+        if: steps.fp.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - uses: actions/deploy-pages@v4
+        if: steps.fp.outputs.changed == 'true'
+
+      - name: Verify published artifacts by content hash
+        if: steps.fp.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          BASE="https://nikrabaev.github.io/coolify/releases/${VERSION}"
+          for f in docker-compose.yml docker-compose.prod.yml .env.production upgrade-postgres.sh; do
+            for attempt in 1 2 3 4 5 6; do
+              REMOTE=$(curl -fsSL "${BASE}/${f}" | sha256sum | cut -d' ' -f1) && break || sleep 20
+            done
+            LOCAL=$(sha256sum "site/coolify/releases/${VERSION}/${f}" | cut -d' ' -f1)
+            test "$REMOTE" = "$LOCAL" || { echo "hash mismatch for ${f}"; exit 1; }
+          done
+
+      - name: Advertise the release
+        if: steps.fp.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Tag and prod come from the built worktree HEAD; origin is the fork.
+          git -C .build push --quiet origin "HEAD:refs/tags/${VERSION}"
+          git -C .build push --quiet --force origin HEAD:prod
+          # versions.json becomes visible only now — it is the release pointer.
+          cp versions.fork.json site/coolify/versions.json
+
+      - uses: actions/upload-pages-artifact@v3
+        if: steps.fp.outputs.changed == 'true'
+        with:
+          path: site
+
+      - uses: actions/deploy-pages@v4
+        if: steps.fp.outputs.changed == 'true'
+
+      - name: Record success
+        if: steps.fp.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          FINGERPRINT: ${{ steps.fp.outputs.fingerprint }}
+        run: |
+          # The workspace root never left fork-main; only .build holds prod-next.
+          node -e "
+            import('./fork/lib/state.js').then((m) =>
+              m.writeLastSuccess('state/last-success.json', {
+                fingerprint: process.env.FINGERPRINT,
+                version: process.env.VERSION,
+              }))
+          "
+          cp -r .git/rr-cache/. state/rr-cache/ 2>/dev/null || true
+          git add state/
+          git commit -qm "chore(fork): record ${VERSION} [skip ci]" || true
+          git push --quiet origin HEAD:fork-main
+
       - name: Escalate on failure
         if: failure()
         env:
