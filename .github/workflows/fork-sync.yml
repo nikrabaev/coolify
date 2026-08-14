@@ -59,6 +59,22 @@ jobs:
     # actions/deploy-pages requires its job to target the github-pages
     # environment; without this the deploy fails at runtime.
     environment: github-pages
+    services:
+      # The design originally assumed no service containers were needed, because
+      # phpunit.xml forces sqlite/array/sync. That held for the database but not
+      # for Redis: the HTTP middleware pipeline resolves a Redis-backed store
+      # during feature tests regardless, producing ~510 "Connection refused"
+      # failures. Giving CI a real Redis also makes the gate exercise what
+      # production actually runs.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     permissions:
       contents: write
       packages: write
