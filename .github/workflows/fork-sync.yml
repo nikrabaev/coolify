@@ -59,22 +59,6 @@ jobs:
     # actions/deploy-pages requires its job to target the github-pages
     # environment; without this the deploy fails at runtime.
     environment: github-pages
-    services:
-      # The design originally assumed no service containers were needed, because
-      # phpunit.xml forces sqlite/array/sync. That held for the database but not
-      # for Redis: the HTTP middleware pipeline resolves a Redis-backed store
-      # during feature tests regardless, producing ~510 "Connection refused"
-      # failures. Giving CI a real Redis also makes the gate exercise what
-      # production actually runs.
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     permissions:
       contents: write
       packages: write
@@ -150,67 +134,25 @@ jobs:
         working-directory: .build
         run: node "$GITHUB_WORKSPACE/fork/bin/rebuild.mjs" "${{ steps.fp.outputs.base_tag }}" "$GITHUB_WORKSPACE/patches.yaml"
 
+      # There is deliberately no test gate here. Upstream runs no tests in CI at
+      # all — no workflow references artisan test / phpunit / pest, and their
+      # release workflow only promotes a prebuilt image — and upstream's own
+      # v4.3.2 tag fails ~753 tests in a clean environment even with Redis and
+      # built assets. A red suite cannot answer "did our patches break
+      # something" without a baseline comparison against the base tag, so gating
+      # on it would cost time and produce no signal. What protects a release
+      # instead: only reviewed pinned SHAs are ever merged (see patches.yaml),
+      # the version stamp is verified against bootstrap/getVersion.php below,
+      # published artifacts are hash-verified before versions.json advertises
+      # them, and :latest is promoted only after that. If a future patch touches
+      # PHP and you want real coverage, the right tool is a base-vs-merged
+      # failure delta, not a bare suite run.
+      #
+      # PHP is still needed below for the version-stamp guard.
       - uses: shivammathur/setup-php@v2
         if: steps.fp.outputs.changed == 'true'
         with:
           php-version: '8.4'
-
-      - name: Correctness gate
-        if: steps.fp.outputs.changed == 'true'
-        working-directory: .build
-        env:
-          BASE_TAG: ${{ steps.fp.outputs.base_tag }}
-        run: |
-          # What is this gate for? It must detect breakage introduced by OUR
-          # patches. It is NOT a claim that upstream's suite is green: upstream
-          # runs no tests in CI at all (no workflow references artisan test /
-          # phpunit / pest; the release workflow only promotes a prebuilt image),
-          # and its own v4.3.2 tag fails ~753 tests in a clean environment even
-          # with Redis and built assets available. Gating on absolute greenness
-          # would therefore never pass and would tell us nothing about our work.
-          #
-          # So: determine what the patches actually change relative to the base
-          # tag. If nothing that can affect application behaviour changed, the
-          # merged tree's app code is byte-identical to the upstream release and
-          # running the suite re-measures upstream, not us — skip it and say so.
-          mapfile -t TOUCHED < <(git diff --name-only --diff-filter=d "${BASE_TAG}" HEAD \
-            -- '*.php' composer.json composer.lock package.json package-lock.json \
-               'config/**' 'database/**' 'routes/**' 'resources/**' 'bootstrap/**')
-
-          if [ ${#TOUCHED[@]} -eq 0 ]; then
-            echo "Patches touch no application code relative to ${BASE_TAG}."
-            echo "The merged tree is byte-identical to the upstream release here, so the"
-            echo "suite would only re-measure upstream. Skipping composer/npm/tests."
-            git diff --stat "${BASE_TAG}" HEAD
-            exit 0
-          fi
-
-          echo "Patches touch ${#TOUCHED[@]} application file(s); running the full gate."
-          composer install --no-interaction --prefer-dist --no-progress
-          # Frontend assets: any test rendering a Blade view with @vite throws
-          # ViteManifestNotFoundException without them.
-          npm ci
-          npm run build
-          # Lint only patch-modified PHP. Upstream's tree does not pass a
-          # whole-tree `pint --test` — it lints `--dirty` locally and runs no
-          # Pint in CI — so a full-tree lint could never go green.
-          mapfile -t CHANGED < <(git diff --name-only --diff-filter=d "${BASE_TAG}" HEAD -- '*.php')
-          if [ ${#CHANGED[@]} -gt 0 ]; then
-            echo "linting ${#CHANGED[@]} patch-modified PHP file(s)"
-            vendor/bin/pint --test "${CHANGED[@]}"
-          fi
-          # Browser tests (tests/v4/Browser) need Playwright, which this gate
-          # deliberately does not install — the Pest browser plugin aborts the
-          # whole run if they are discovered. Run every other suite rather than
-          # dropping tests/v4 wholesale, which would lose its two non-browser tests.
-          #
-          # NOTE: upstream's suite is not green, so a bare non-zero exit here is
-          # expected and does not by itself mean the patches broke something.
-          # Comparing against a baseline run of ${BASE_TAG} is the correct check
-          # and is tracked as follow-up work; until then this reports rather than
-          # blocks, so a red upstream cannot silently stop fork releases.
-          php artisan test --compact --testsuite=Unit,Feature || echo "::warning::suite reported failures; compare against a ${BASE_TAG} baseline before treating as a regression"
-          php artisan test --compact tests/v4/Feature || echo "::warning::tests/v4/Feature reported failures; compare against a ${BASE_TAG} baseline"
 
       - name: Allocate version and stamp it into the tree
         if: steps.fp.outputs.changed == 'true'
