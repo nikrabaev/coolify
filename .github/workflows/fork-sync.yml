@@ -142,9 +142,21 @@ jobs:
       - name: Correctness gate
         if: steps.fp.outputs.changed == 'true'
         working-directory: .build
+        env:
+          BASE_TAG: ${{ steps.fp.outputs.base_tag }}
         run: |
           composer install --no-interaction --prefer-dist --no-progress
-          vendor/bin/pint --test
+          # Lint only the PHP our patches actually change. Upstream's tree does
+          # not pass a whole-tree `pint --test` — it lints `--dirty` locally and
+          # runs no Pint in CI — so gating on the full tree could never go green
+          # and would fail on upstream's own migrations and tests.
+          mapfile -t CHANGED < <(git diff --name-only --diff-filter=d "${BASE_TAG}" HEAD -- '*.php')
+          if [ ${#CHANGED[@]} -gt 0 ]; then
+            echo "linting ${#CHANGED[@]} patch-modified PHP file(s)"
+            vendor/bin/pint --test "${CHANGED[@]}"
+          else
+            echo "no PHP files changed by patches; skipping pint"
+          fi
           php artisan test --compact
 
       - name: Allocate version and stamp it into the tree
