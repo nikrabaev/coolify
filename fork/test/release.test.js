@@ -130,6 +130,66 @@ test('writes a version containing regex replacement patterns literally', () => {
   assert.match(out, /'helper_version' => '1\.0\.14'/)
 })
 
+test('patches the env() fallback literal in the v4.3.2 shape, leaving the env() lookup intact', () => {
+  const php =
+    `<?php\n\nreturn [\n` +
+    `    'coolify' => [\n` +
+    `        'version' => env('COOLIFY_VERSION') ?: '4.3.2',\n` +
+    `        'helper_version' => '1.0.14',\n` +
+    `    ],\n` +
+    `];\n`
+  const out = patchConstantsVersion(php, '4.3.2.1')
+  assert.match(out, /'version' => env\('COOLIFY_VERSION'\) \?: '4\.3\.2\.1',/)
+  assert.match(out, /'helper_version' => '1\.0\.14'/)
+})
+
+test('still patches the plain v4.2.0 shape (regression guard for the old form)', () => {
+  const php = `<?php\n\nreturn [\n    'coolify' => [\n        'version' => '4.2.0',\n        'helper_version' => '1.0.14',\n    ],\n];\n`
+  const out = patchConstantsVersion(php, '4.2.0.1')
+  assert.match(out, /'version' => '4\.2\.0\.1',/)
+  assert.match(out, /'helper_version' => '1\.0\.14'/)
+})
+
+test('patches only the top-level coolify.version in the env() shape, not a version key nested inside a sub-array', () => {
+  const php =
+    `<?php\n\nreturn [\n` +
+    `    'coolify' => [\n` +
+    `        'some_nested' => [ 'version' => 'nested-should-not-match' ],\n` +
+    `        'version' => env('COOLIFY_VERSION') ?: '4.3.2',\n` +
+    `        'helper_version' => '1.0.14',\n` +
+    `    ],\n` +
+    `];\n`
+  const out = patchConstantsVersion(php, '9.9.9')
+  assert.match(out, /'coolify' => \[[\s\S]*'version' => env\('COOLIFY_VERSION'\) \?: '9\.9\.9'/)
+  assert.match(out, /'nested-should-not-match'/)
+})
+
+test('writes a version containing regex replacement patterns literally in the env() shape', () => {
+  const php =
+    `<?php\n\nreturn [\n` +
+    `    'coolify' => [\n` +
+    `        'version' => env('COOLIFY_VERSION') ?: '4.3.2',\n` +
+    `        'helper_version' => '1.0.14',\n` +
+    `    ],\n` +
+    `];\n`
+  const out = patchConstantsVersion(php, '4.3.2$1-weird$&')
+  assert.match(out, /'version' => env\('COOLIFY_VERSION'\) \?: '4\.3\.2\$1-weird\$&',/)
+  assert.match(out, /'helper_version' => '1\.0\.14'/)
+})
+
+test('a comma inside a trailing comment does not terminate the version statement early', () => {
+  const php =
+    `<?php\n\nreturn [\n` +
+    `    'coolify' => [\n` +
+    `        'version' => env('X') ?: '4.3.2', // note, with a comma\n` +
+    `        'helper_version' => '1.0.14',\n` +
+    `    ],\n` +
+    `];\n`
+  const out = patchConstantsVersion(php, '9.9.9')
+  assert.match(out, /'version' => env\('X'\) \?: '9\.9\.9', \/\/ note, with a comma/)
+  assert.match(out, /'helper_version' => '1\.0\.14'/)
+})
+
 test('patches the real upstream constants.php, leaving sibling version keys untouched', { skip: !existsSync(REAL_CONSTANTS_PHP_PATH) }, () => {
   const original = readFileSync(REAL_CONSTANTS_PHP_PATH, 'utf8')
   const out = patchConstantsVersion(original, '4.2.0.1')

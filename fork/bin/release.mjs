@@ -19,7 +19,7 @@ export function deriveVersionsJson(builtVersionsJson, version) {
 }
 
 const COOLIFY_ARRAY_OPEN = /'coolify'\s*=>\s*\[/g
-const VERSION_KEY = /'version'\s*=>\s*'([^']*)'/yd
+const VERSION_KEY = /'version'\s*=>\s*/y
 
 /**
  * Build a same-length copy of `php` where the interior of every string
@@ -117,10 +117,103 @@ function maskStringsAndComments(php) {
 }
 
 /**
- * Find the `'version' => '...'` entry that sits directly inside the
+ * Scan forward from `start` (a byte offset immediately after a top-level
+ * `'version' =>`) to the offset of the statement's terminating comma — the
+ * comma that ends this array entry, at the same bracket depth the value
+ * started at (relative depth 0). Falls back to the offset of the enclosing
+ * array's closing `]` when there is no trailing comma; that shouldn't
+ * happen for a Laravel config array (they always trail with a comma), but
+ * it keeps the scan from running past the array unbounded.
+ *
+ * `mask` (see `maskStringsAndComments`) is used throughout so a comma or
+ * bracket embedded in a string literal or a trailing comment — e.g.
+ * `env('X') ?: '4.3.2', // note, with a comma` — can't be mistaken for the
+ * real terminator.
+ *
+ * @param {string} mask
+ * @param {number} start
+ * @returns {number}
+ */
+function findStatementEnd(mask, start) {
+  let depth = 0
+  for (let i = start; i < mask.length; i++) {
+    const ch = mask[i]
+    if (ch === '[') {
+      depth++
+      continue
+    }
+    if (ch === ']') {
+      if (depth === 0) {
+        return i
+      }
+      depth--
+      continue
+    }
+    if (ch === ',' && depth === 0) {
+      return i
+    }
+  }
+  return mask.length
+}
+
+/**
+ * Find the last single-quoted string literal within `[start, end)` — the
+ * span of a `'version' => ...` statement. For the plain
+ * `'version' => '4.2.0'` shape this is the only literal in the span. For
+ * upstream's newer `'version' => env('COOLIFY_VERSION') ?: '4.3.2'` shape
+ * it's the fallback literal after `?:`, which is exactly the value that
+ * takes effect wherever this config is read through an empty/stubbed
+ * `env()` — including the release pipeline's own version-stamp check,
+ * `php bootstrap/getVersion.php`. So the fallback literal, not the `env()`
+ * lookup, is the correct patch target in both shapes.
+ *
+ * Only `'`-delimited spans survive in `mask` at their true open/close
+ * offsets (see `maskStringsAndComments`) — interior bytes of every string
+ * and comment are blanked. Pairing up surviving `'` positions therefore
+ * finds real single-quoted literals only, never text that merely looks
+ * like one inside a `"..."` string or a comment.
+ *
+ * @param {string} mask
+ * @param {number} start
+ * @param {number} end
+ * @returns {{start: number, end: number} | null} offsets of the literal's
+ *   contents (excluding the quotes), or null if the span has no
+ *   single-quoted literal.
+ */
+function findLastStringLiteral(mask, start, end) {
+  let open = -1
+  let lastOpen = -1
+  let lastClose = -1
+  for (let i = start; i < end; i++) {
+    if (mask[i] !== "'") {
+      continue
+    }
+    if (open === -1) {
+      open = i
+    } else {
+      lastOpen = open
+      lastClose = i
+      open = -1
+    }
+  }
+  return lastOpen === -1 ? null : { start: lastOpen + 1, end: lastClose }
+}
+
+/**
+ * Find the `'version' => ...` entry that sits directly inside the
  * `'coolify' => [ ... ]` array — not one nested inside a sub-array of it,
  * and not one that merely looks that way because it's sitting inside a
- * string literal or a comment.
+ * string literal or a comment — and return the offsets of the last
+ * single-quoted literal in its value expression.
+ *
+ * Upstream has used two shapes for this line across releases:
+ *   'version' => '4.2.0',
+ *   'version' => env('COOLIFY_VERSION') ?: '4.3.2',
+ * Locating "the last string literal before the terminating comma" handles
+ * both: for the plain shape that literal is the version itself; for the
+ * `env() ?:` shape it's the fallback literal, which is what a stubbed
+ * `env()` (as used by the release pipeline's verification step) actually
+ * evaluates to.
  *
  * A plain non-greedy regex can't express "at this nesting depth", so this
  * walks the block character by character tracking bracket depth and only
@@ -133,8 +226,9 @@ function maskStringsAndComments(php) {
  *
  * @param {string} constantsPhp
  * @returns {{start: number, end: number} | null} byte offsets of the
- *   version value (excluding the surrounding quotes), or null if no
- *   top-level version entry exists inside the coolify array.
+ *   version literal (excluding the surrounding quotes), or null if no
+ *   top-level version entry (with a patchable literal) exists inside the
+ *   coolify array.
  */
 function findTopLevelCoolifyVersion(constantsPhp) {
   const mask = maskStringsAndComments(constantsPhp)
@@ -183,8 +277,9 @@ function findTopLevelCoolifyVersion(constantsPhp) {
     VERSION_KEY.lastIndex = i
     const m = VERSION_KEY.exec(constantsPhp)
     if (m && m.index === i) {
-      const [start, end] = m.indices[1]
-      return { start, end }
+      const valueStart = i + m[0].length
+      const statementEnd = findStatementEnd(mask, valueStart)
+      return findLastStringLiteral(mask, valueStart, statementEnd)
     }
   }
 
