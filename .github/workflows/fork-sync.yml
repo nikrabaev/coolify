@@ -146,6 +146,11 @@ jobs:
           BASE_TAG: ${{ steps.fp.outputs.base_tag }}
         run: |
           composer install --no-interaction --prefer-dist --no-progress
+          # Build frontend assets before testing. Any test that renders a Blade
+          # view using @vite throws ViteManifestNotFoundException without them —
+          # that alone accounted for the bulk of a 1211-failure run.
+          npm ci
+          npm run build
           # Lint only the PHP our patches actually change. Upstream's tree does
           # not pass a whole-tree `pint --test` — it lints `--dirty` locally and
           # runs no Pint in CI — so gating on the full tree could never go green
