@@ -169,9 +169,13 @@ jobs:
           file: .build/docker/production/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/nikrabaev/coolify:${{ steps.version.outputs.version }}
-            ghcr.io/nikrabaev/coolify:latest
+          # Only the immutable version tag is pushed here. `:latest` is promoted
+          # after the release is verified and advertised — see below. Pushing it
+          # now would move `:latest` before the CDN artifacts are known-good, and
+          # nothing rolls it back on a later failure; docker-compose.prod.yml
+          # falls back to `:latest` whenever LATEST_IMAGE is unset, which would
+          # bypass the versions.json pointer this design is built around.
+          tags: ghcr.io/nikrabaev/coolify:${{ steps.version.outputs.version }}
 
       - name: Publish artifacts (versions.json withheld)
         if: steps.fp.outputs.changed == 'true'
@@ -228,6 +232,18 @@ jobs:
 
       - uses: actions/deploy-pages@v4
         if: steps.fp.outputs.changed == 'true'
+
+      - name: Promote :latest to the advertised release
+        if: steps.fp.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Runs only after the release is verified and advertised, so `:latest`
+          # can never point at a build whose CDN artifacts failed to publish.
+          # imagetools retags the existing multi-arch manifest — no rebuild.
+          docker buildx imagetools create \
+            "ghcr.io/nikrabaev/coolify:${VERSION}" \
+            --tag ghcr.io/nikrabaev/coolify:latest
 
       - name: Record success
         if: steps.fp.outputs.changed == 'true'
