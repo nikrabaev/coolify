@@ -187,11 +187,25 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
+          # pipefail is essential here. Without it a pipeline reports the status
+          # of its LAST command, so a 404 from curl would still exit 0 via
+          # sha256sum and "succeed" with the hash of empty input — breaking out
+          # of the retry on exactly the propagation delay the retry exists for,
+          # then failing with a misleading "hash mismatch".
+          set -o pipefail
           BASE="https://nikrabaev.github.io/coolify/releases/${VERSION}"
           for f in docker-compose.yml docker-compose.prod.yml .env.production upgrade-postgres.sh; do
+            REMOTE=""
             for attempt in 1 2 3 4 5 6; do
-              REMOTE=$(curl -fsSL "${BASE}/${f}" | sha256sum | cut -d' ' -f1) && break || sleep 20
+              REMOTE=$(curl -fsSL "${BASE}/${f}" | sha256sum | cut -d' ' -f1) && break
+              echo "attempt ${attempt}: ${f} not served yet; waiting for Pages to propagate"
+              REMOTE=""
+              sleep 20
             done
+            if [ -z "$REMOTE" ]; then
+              echo "FATAL: ${BASE}/${f} never became reachable; refusing to advertise this release"
+              exit 1
+            fi
             LOCAL=$(sha256sum "site/coolify/releases/${VERSION}/${f}" | cut -d' ' -f1)
             test "$REMOTE" = "$LOCAL" || { echo "hash mismatch for ${f}"; exit 1; }
           done
