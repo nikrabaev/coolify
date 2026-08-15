@@ -55,7 +55,11 @@ jobs:
     # block every build. Probe still goes red so the failure stays visible.
     needs: probe
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
+    # Native arm64 runner, because the image below is linux/arm64 (the target
+    # server is an ARM instance). Building arm64 on an amd64 runner goes through
+    # QEMU emulation — a earlier run exceeded two hours and was still going.
+    # arm64 runners are free for public repositories.
+    runs-on: ubuntu-24.04-arm
     # actions/deploy-pages requires its job to target the github-pages
     # environment; without this the deploy fails at runtime.
     environment: github-pages
@@ -205,7 +209,11 @@ jobs:
         with:
           context: .build
           file: .build/docker/production/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          # Single native architecture. Add a second platform only alongside a
+          # matrix of native runners plus a manifest merge (upstream's
+          # coolify-sha-build.yml is the model) — never as a second platform
+          # here, which silently reintroduces multi-hour emulated builds.
+          platforms: linux/arm64
           push: true
           # Only the immutable version tag is pushed here. `:latest` is promoted
           # after the release is verified and advertised — see below. Pushing it
