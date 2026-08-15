@@ -74,6 +74,12 @@ jobs:
         with:
           ref: fork-main
           fetch-depth: 0
+          # Without this, checkout leaves an http.extraheader carrying
+          # GITHUB_TOKEN's Authorization for every github.com URL. That header
+          # overrides the credentials in a rewritten remote URL, so pushes kept
+          # authenticating as the GitHub App and were rejected for touching
+          # .github/workflows/ — even with FORK_SYNC_TOKEN configured.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -100,6 +106,10 @@ jobs:
             echo "branch cannot be pushed."
             exit 1
           fi
+          # Belt and braces: checkout runs with persist-credentials: false, but
+          # drop any lingering Authorization header anyway — it would override
+          # the URL credentials below and silently push as the GitHub App again.
+          git config --unset-all "http.https://github.com/.extraheader" 2>/dev/null || true
           # Rewriting origin routes every later push (mirror, tag, prod, state)
           # through this token. resolveRemotes() matches on the repo path and
           # tolerates userinfo in the URL, so remote resolution is unaffected.
