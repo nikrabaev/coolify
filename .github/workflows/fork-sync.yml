@@ -84,6 +84,28 @@ jobs:
       - name: Verify fingerprint purity invariant
         run: npm test
 
+      - name: Authenticate pushes with the release token
+        env:
+          FORK_SYNC_TOKEN: ${{ secrets.FORK_SYNC_TOKEN }}
+        run: |
+          # GITHUB_TOKEN may never create or update files under .github/workflows/,
+          # and that cannot be granted via the permissions: block — it is a
+          # token-level scope. Both `prod` and every release tag carry upstream's
+          # workflow files, so pushing them needs a fine-grained PAT instead.
+          if [ -z "$FORK_SYNC_TOKEN" ]; then
+            echo "FATAL: repository secret FORK_SYNC_TOKEN is not set."
+            echo "Create a fine-grained PAT scoped to this repository with"
+            echo "Contents: Read and write AND Workflows: Read and write, then add it"
+            echo "as the FORK_SYNC_TOKEN secret. Without it the release tag and prod"
+            echo "branch cannot be pushed."
+            exit 1
+          fi
+          # Rewriting origin routes every later push (mirror, tag, prod, state)
+          # through this token. resolveRemotes() matches on the repo path and
+          # tolerates userinfo in the URL, so remote resolution is unaffected.
+          git remote set-url origin \
+            "https://x-access-token:${FORK_SYNC_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+
       - name: Configure git identity
         # Runners have no identity configured, and this job creates commits in
         # three places: the merge commits in rebuild, the version stamp, and the
