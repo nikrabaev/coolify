@@ -171,13 +171,21 @@ jobs:
         if: steps.fp.outputs.changed == 'true'
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          DEST_DIR: site/coolify/releases/${{ steps.version.outputs.version }}
+          DEST_DIR: site/releases/${{ steps.version.outputs.version }}
         run: |
+          # NOTE the layout: the uploaded artifact's root IS already
+          # https://nikrabaev.github.io/coolify/ , because this is a project
+          # Pages site for a repo named "coolify". So versions.json and
+          # upgrade.sh go at the root of site/, NOT under site/coolify/ —
+          # nesting them produced /coolify/coolify/... and 404'd every fetch.
+          # Coolify asks for ${CDN_URL}/coolify/versions.json, and with
+          # CDN_URL=https://nikrabaev.github.io that resolves to site/versions.json.
+          #
           # Every artifact comes from the built .build tree, never fork-main.
           mkdir -p "$DEST_DIR"
           cp .build/docker-compose.yml .build/docker-compose.prod.yml .build/.env.production "$DEST_DIR/"
           cp .build/scripts/upgrade-postgres.sh "$DEST_DIR/"
-          cp .build/scripts/upgrade.sh site/coolify/upgrade.sh
+          cp .build/scripts/upgrade.sh site/upgrade.sh
           # versions.json is deliberately NOT placed into site/ yet; see
           # buildVersionsForkJson in fork/bin/publish.mjs.
           node fork/bin/publish.mjs assemble-site
@@ -246,7 +254,7 @@ jobs:
               echo "FATAL: ${BASE}/${f} never became reachable; refusing to advertise this release"
               exit 1
             fi
-            LOCAL=$(sha256sum "site/coolify/releases/${VERSION}/${f}" | cut -d' ' -f1)
+            LOCAL=$(sha256sum "site/releases/${VERSION}/${f}" | cut -d' ' -f1)
             test "$REMOTE" = "$LOCAL" || { echo "hash mismatch for ${f}"; exit 1; }
           done
 
@@ -259,7 +267,7 @@ jobs:
           git -C .build push --quiet origin "HEAD:refs/tags/${VERSION}"
           git -C .build push --quiet --force origin HEAD:prod
           # versions.json becomes visible only now — it is the release pointer.
-          cp versions.fork.json site/coolify/versions.json
+          cp versions.fork.json site/versions.json
 
       - name: Publish versions.json (advertises the release)
         if: steps.fp.outputs.changed == 'true'

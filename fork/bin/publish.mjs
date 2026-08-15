@@ -59,7 +59,7 @@ export function resolveReleaseVersion(baseTag, existingTags, constantsPhp) {
  * Verify artifact coverage and derive the fork's `versions.json` patch, for
  * the "Assemble the Pages site" workflow step. The result is written to
  * `versions.fork.json`, not into `site/`: the "Advertise the release"
- * workflow step copies it into `site/coolify/versions.json` only after the
+ * workflow step copies it into `site/versions.json` only after the
  * Pages deploy and hash verification that follow this step, because it is
  * the pointer that advertises the release.
  *
