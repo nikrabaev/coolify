@@ -1,7 +1,7 @@
 #!/bin/bash
 ## Do not modify this file. You will lose the ability to autoupdate!
 
-CDN="https://cdn.coollabs.io/coolify"
+CDN="${CDN_OVERRIDE:-https://nikrabaev.github.io/coolify}"
 LATEST_IMAGE=${1:-latest}
 LATEST_HELPER_VERSION=${2:-latest}
 ENV_FILE="/data/coolify/source/.env"
@@ -56,14 +56,29 @@ echo "============================================================" >>"$LOGFILE"
 log_section "Step 1/6: Downloading configuration files"
 write_status "1" "Downloading configuration files"
 echo "1/6 Downloading latest configuration files..."
-log "Downloading docker-compose.yml from ${CDN}/docker-compose.yml"
-curl -fsSL -L $CDN/docker-compose.yml -o /data/coolify/source/docker-compose.yml
-log "Downloading docker-compose.prod.yml from ${CDN}/docker-compose.prod.yml"
-curl -fsSL -L $CDN/docker-compose.prod.yml -o /data/coolify/source/docker-compose.prod.yml
-log "Downloading .env.production from ${CDN}/.env.production"
-curl -fsSL -L $CDN/.env.production -o /data/coolify/source/.env.production
-log "Downloading upgrade-postgres.sh from ${CDN}/upgrade-postgres.sh"
-curl -fsSL -L $CDN/upgrade-postgres.sh -o /data/coolify/source/upgrade-postgres.sh
+fetch_artifact() {
+    local url="$1"
+    local dest="$2"
+    local name
+    name="$(basename "$dest")"
+    log "Downloading ${name} from ${url}"
+    if ! curl -fsSL -L "${url}" -o "${dest}"; then
+        log "FATAL: failed to download ${url}"
+        echo "FATAL: failed to download ${name} for release ${LATEST_IMAGE}" >&2
+        exit 1
+    fi
+}
+
+# Keep the CDN variable expanded inline at every call site below. The release
+# gate extracts these paths by regex (parseCdnUrls, fork/bin/release.mjs on
+# fork-main) to check each artifact was published; routing them through an
+# intermediate variable makes the gate match fewer paths and pass while an
+# artifact is missing. Note the regex also scans comments, so do not write an
+# example CDN path here.
+fetch_artifact "${CDN}/releases/${LATEST_IMAGE}/docker-compose.yml" /data/coolify/source/docker-compose.yml
+fetch_artifact "${CDN}/releases/${LATEST_IMAGE}/docker-compose.prod.yml" /data/coolify/source/docker-compose.prod.yml
+fetch_artifact "${CDN}/releases/${LATEST_IMAGE}/.env.production" /data/coolify/source/.env.production
+fetch_artifact "${CDN}/releases/${LATEST_IMAGE}/upgrade-postgres.sh" /data/coolify/source/upgrade-postgres.sh
 chmod +x /data/coolify/source/upgrade-postgres.sh
 log "Configuration files downloaded successfully"
 echo "     Done."
