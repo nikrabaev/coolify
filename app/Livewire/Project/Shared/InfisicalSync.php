@@ -34,6 +34,7 @@ class InfisicalSync extends Component
         SyncInfisicalSecrets::SKIP_INVALID_KEY => 'not a valid environment variable name',
         SyncInfisicalSecrets::SKIP_MANUAL_OVERRIDE => 'you have a manual variable with this key',
         SyncInfisicalSecrets::SKIP_COOLIFY_MAGIC => 'reserved by Coolify',
+        SyncInfisicalSecrets::SKIP_COMPOSE_REFERENCE => 'gone from Infisical, but kept as a manual variable because your compose file still uses it',
     ];
 
     #[Locked]
