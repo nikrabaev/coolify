@@ -97,7 +97,6 @@ class EnvironmentVariable extends BaseModel
         'is_shown_once',
         'is_shared',
         'is_required',
-        'is_managed_by_infisical',
 
         // Metadata
         'version',
@@ -148,7 +147,7 @@ class EnvironmentVariable extends BaseModel
                     $application = Application::find($environment_variable->resourceable_id);
                     // A compose preview generates its own magic secrets on the first pull request parse.
                     if ($application && ! ($application->build_pack === 'dockercompose' && $environment_variable->isGeneratedMagicVariable())) {
-                        ModelsEnvironmentVariable::create([
+                        $preview = new ModelsEnvironmentVariable([
                             'key' => $environment_variable->key,
                             'value' => $environment_variable->value,
                             'is_multiline' => $environment_variable->is_multiline ?? false,
@@ -158,11 +157,15 @@ class EnvironmentVariable extends BaseModel
                             'is_required' => $environment_variable->is_required ?? false,
                             'is_shown_once' => $environment_variable->is_shown_once ?? false,
                             'comment' => $environment_variable->comment,
-                            'is_managed_by_infisical' => $environment_variable->is_managed_by_infisical ?? false,
                             'resourceable_type' => Application::class,
                             'resourceable_id' => $environment_variable->resourceable_id,
                             'is_preview' => true,
                         ]);
+                        // Deliberately not mass-assignable: the API env endpoints pass
+                        // request data straight into updateOrCreate, so a fillable flag
+                        // would let a caller mark their own variable Infisical-managed.
+                        $preview->is_managed_by_infisical = $environment_variable->is_managed_by_infisical ?? false;
+                        $preview->save();
                     }
                 }
             }
