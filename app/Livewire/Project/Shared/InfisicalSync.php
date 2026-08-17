@@ -397,6 +397,9 @@ class InfisicalSync extends Component
     {
         if ($result['changed']) {
             $message = "Created {$result['created']}, updated {$result['updated']}, removed {$result['removed']}.";
+            if (($result['adopted'] ?? 0) > 0) {
+                $message .= " Filled {$result['adopted']} empty variable(s) that were waiting for a value.";
+            }
         } else {
             $message = 'Already up to date.';
         }
