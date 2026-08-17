@@ -21,8 +21,12 @@ class InfisicalDeploymentSync
 {
     use AsAction;
 
-    /** A deployment may wait this long for a competing sync to finish. */
-    private const LOCK_WAIT_SECONDS = 30;
+    /**
+     * A deployment waits this long for a competing sync. It must exceed the time a
+     * single sync can take (two Infisical calls at a 30s timeout each), otherwise a
+     * slow background poll would abort an unrelated deployment.
+     */
+    private const LOCK_WAIT_SECONDS = 75;
 
     /**
      * @throws DeploymentException when the sync fails and the config is set to abort
