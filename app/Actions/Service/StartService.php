@@ -6,6 +6,7 @@ use App\Actions\Shared\EnsureContentFilesOnServer;
 use App\Events\ServiceStartFinished;
 use App\Jobs\ServerFilesFromServerJob;
 use App\Models\LocalFileVolume;
+use App\Actions\Infisical\InfisicalDeploymentSync;
 use App\Models\Service;
 use App\Models\ServiceApplication;
 use App\Models\ServiceDatabase;
@@ -25,6 +26,7 @@ class StartService
 
     public function handle(Service $service, bool $pullLatestImages = false, bool $stopBeforeStart = false)
     {
+        InfisicalDeploymentSync::run($service);
         $service->parse();
         self::queueFileStorageSync($service);
         // Fetch remote secrets before stopping: if the secret manager fails, the service keeps running.

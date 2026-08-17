@@ -40,6 +40,10 @@
                 <span class="table-badge shrink-0"
                     title="Used by Compose services: {{ implode(', ', $composeInfo['services']) }}">Used by Compose</span>
             @endif
+            @if ($isManagedByInfisical)
+                <span class="table-badge shrink-0"
+                    title="Synced from Infisical. Convert it to a manual variable on the Infisical tab to edit it.">Infisical</span>
+            @endif
         </div>
         @if (! $isSharedVariable)
             @if ($isMagicVariable)
@@ -255,6 +259,13 @@
                         </div>
                     @endif
 
+                    @if ($isManagedByInfisical)
+                        <div class="text-sm text-neutral-500 dark:text-fg-dim">
+                            This variable is synced from Infisical and cannot be edited here. Change it in Infisical, or
+                            convert it to a manual variable on the Infisical tab to take it over.
+                        </div>
+                    @endif
+
                     @if (!$isSharedVariable)
                         <x-environment-variable-warning :problematic-variables="$problematicVariables" />
                     @endif
@@ -264,7 +275,7 @@
                             class="flex flex-wrap items-center justify-between gap-2 border-t border-neutral-200 pt-4 dark:border-white/[0.07]">
                             <div data-environment-variable-delete-action>
                                 @can('delete', $this->env)
-                                    @if (!$isMagicVariable)
+                                    @if (!$isMagicVariable && !$isManagedByInfisical)
                                         <x-modal-confirmation title="Confirm Environment Variable Deletion?" isErrorButton
                                             buttonTitle="Delete" submitAction="delete"
                                             :actions="['The selected environment variable will be permanently deleted.']"
@@ -282,7 +293,7 @@
                                         Connect to resources
                                     </a>
                                 @endif
-                                @if ($canUpdate && !$isLocked && !$isMagicVariable)
+                                @if ($canUpdate && !$isLocked && !$isMagicVariable && !$isManagedByInfisical)
                                     <x-forms.button type="button" wire:click="lock">Lock</x-forms.button>
                                 @endif
                                 @if ($canUpdate && !$isDisabled)
