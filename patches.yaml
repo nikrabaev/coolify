@@ -10,3 +10,7 @@ patches:
     type: branch
     ref: patch/fork-cdn-hardening
     reason: repoint upgrade.sh CDN, versioned release paths, fail-fast downloads
+  - id: infisical-integration
+    type: branch
+    ref: patch/infisical-integration
+    reason: native Infisical secret sync (pre-deploy sync, webhook/poll redeploy, per-resource config)
