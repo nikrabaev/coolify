@@ -15,8 +15,9 @@
 <div class="flex flex-col gap-6">
     <x-callout type="info" title="How syncing works">
         Coolify pulls the secrets of one Infisical path into this resource and marks every row it writes as managed.
-        Manual variables always win: if you already have a variable with the same key, the synced one is skipped and
-        never overwrites your value.
+        Manual variables always win: if you already have a variable with the same key <em>and a value</em>, the synced
+        one is skipped and never overwrites yours. Variables that exist but are still empty — the placeholders a Docker
+        Compose file creates for its <code>${VAR}</code> references — are filled in from Infisical.
         @if ($this->isApplication())
             Synced variables are written to both the production and the preview scope of this application.
         @endif
@@ -155,6 +156,10 @@
                             class="font-medium text-black dark:text-white">{{ (int) data_get($report, 'updated', 0) }}</span></span>
                     <span>Removed: <span
                             class="font-medium text-black dark:text-white">{{ (int) data_get($report, 'removed', 0) }}</span></span>
+                    @if ((int) data_get($report, 'adopted', 0) > 0)
+                        <span>Filled in: <span
+                                class="font-medium text-black dark:text-white">{{ (int) data_get($report, 'adopted', 0) }}</span></span>
+                    @endif
                 </div>
 
                 @if ($config->last_sync_status === 'failed' && filled($syncError))
