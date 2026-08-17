@@ -177,6 +177,95 @@ it('never touches a manually created variable and skips its key', function () {
     expect(EnvironmentVariable::where('resourceable_id', $application->id)->where('key', 'API_KEY')->where('is_managed_by_infisical', true)->count())->toBe(0);
 });
 
+it('fills the empty placeholder rows a compose file creates', function () {
+    $service = infisicalSyncService();
+
+    // What Service::parse() leaves behind for a `${DATABASE_PASSWORD}` reference.
+    EnvironmentVariable::create([
+        'key' => 'DATABASE_PASSWORD',
+        'value' => null,
+        'is_required' => true,
+        'resourceable_type' => Service::class,
+        'resourceable_id' => $service->id,
+    ]);
+
+    fakeInfisicalSecrets(['DATABASE_PASSWORD' => 'from-infisical']);
+    $result = SyncInfisicalSecrets::run(infisicalSyncConfigFor($service));
+
+    expect($result['adopted'])->toBe(1);
+    expect($result['skipped'])->not->toHaveKey('DATABASE_PASSWORD');
+    expect($result['changed'])->toBeTrue();
+
+    $variable = $service->environment_variables()->where('key', 'DATABASE_PASSWORD')->first();
+    expect($variable->value)->toBe('from-infisical');
+    expect($variable->is_managed_by_infisical)->toBeTrue();
+    // Adopted, not duplicated.
+    expect($service->environment_variables()->where('key', 'DATABASE_PASSWORD')->count())->toBe(1);
+});
+
+it('never adopts a placeholder that the user has filled in', function () {
+    $service = infisicalSyncService();
+    EnvironmentVariable::create([
+        'key' => 'DATABASE_PASSWORD',
+        'value' => 'chosen-by-hand',
+        'resourceable_type' => Service::class,
+        'resourceable_id' => $service->id,
+    ]);
+
+    fakeInfisicalSecrets(['DATABASE_PASSWORD' => 'from-infisical']);
+    $result = SyncInfisicalSecrets::run(infisicalSyncConfigFor($service));
+
+    expect($result['adopted'])->toBe(0);
+    expect($result['skipped']['DATABASE_PASSWORD'])->toBe(SyncInfisicalSecrets::SKIP_MANUAL_OVERRIDE);
+
+    $variable = $service->environment_variables()->where('key', 'DATABASE_PASSWORD')->first();
+    expect($variable->value)->toBe('chosen-by-hand');
+    expect($variable->is_managed_by_infisical)->toBeFalse();
+});
+
+it('leaves an empty placeholder alone when Infisical has no such secret', function () {
+    $service = infisicalSyncService();
+    EnvironmentVariable::create([
+        'key' => 'NOT_IN_INFISICAL',
+        'value' => null,
+        'resourceable_type' => Service::class,
+        'resourceable_id' => $service->id,
+    ]);
+
+    fakeInfisicalSecrets(['SOMETHING_ELSE' => 'x']);
+    $result = SyncInfisicalSecrets::run(infisicalSyncConfigFor($service));
+
+    expect($result['adopted'])->toBe(0);
+    $variable = $service->environment_variables()->where('key', 'NOT_IN_INFISICAL')->first();
+    expect($variable)->not->toBeNull();
+    expect($variable->is_managed_by_infisical)->toBeFalse();
+});
+
+it('treats a key as manual when only one scope was filled in by hand', function () {
+    $application = infisicalSyncApplication();
+    EnvironmentVariable::create([
+        'key' => 'SPLIT_KEY',
+        'value' => 'production-value',
+        'resourceable_type' => Application::class,
+        'resourceable_id' => $application->id,
+        'is_preview' => false,
+    ]);
+    EnvironmentVariable::where('resourceable_id', $application->id)
+        ->where('key', 'SPLIT_KEY')
+        ->where('is_preview', true)
+        ->update(['value' => null]);
+
+    fakeInfisicalSecrets(['SPLIT_KEY' => 'from-infisical']);
+    $result = SyncInfisicalSecrets::run(infisicalSyncConfigFor($application));
+
+    expect($result['adopted'])->toBe(0);
+    expect($result['skipped']['SPLIT_KEY'])->toBe(SyncInfisicalSecrets::SKIP_MANUAL_OVERRIDE);
+    expect(EnvironmentVariable::where('resourceable_id', $application->id)
+        ->where('key', 'SPLIT_KEY')
+        ->where('is_managed_by_infisical', true)
+        ->count())->toBe(0);
+});
+
 it('hands a key back to the user when they take it over by hand', function () {
     fakeInfisicalSecrets(['API_KEY' => 'from-infisical']);
     $application = infisicalSyncApplication();
