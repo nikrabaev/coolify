@@ -21,28 +21,14 @@ class Infisical extends Controller
      */
     public function events(Request $request, string $uuid)
     {
-        $config = InfisicalSyncConfig::where('uuid', $uuid)->first();
-
-        // Answer the same way for an unknown uuid as for a disabled config so the
-        // endpoint cannot be used to discover which configurations exist.
-        if (! $config || ! $config->enabled) {
-            return response()->json(['status' => 'ignored', 'message' => 'Nothing to do.']);
-        }
-
-        $secret = $config->webhook_secret;
-        if (blank($secret)) {
-            auditLogWebhookFailure('infisical', 'webhook_secret_missing', [
-                'infisical_sync_config_uuid' => $config->uuid,
-            ]);
-
-            return response()->json(['status' => 'unauthorized', 'message' => 'No webhook secret is configured.'], 401);
-        }
-
+        // Everything an unauthenticated caller can observe is decided before the
+        // configuration is looked at, so the endpoint cannot be used to tell which
+        // configuration uuids exist: no signature is always 401, and a well-formed
+        // but wrong signature is always the same generic 200.
         $signature = $request->header('x-infisical-signature');
+
         if (blank($signature)) {
-            auditLogWebhookFailure('infisical', 'signature_missing', [
-                'infisical_sync_config_uuid' => $config->uuid,
-            ]);
+            auditLogWebhookFailure('infisical', 'signature_missing', ['uuid' => $uuid]);
 
             return response()->json(['status' => 'unauthorized', 'message' => 'Missing signature.'], 401);
         }
@@ -51,19 +37,28 @@ class Infisical extends Controller
         [$timestamp, $providedHmac] = $this->parseSignature($signature);
 
         if ($providedHmac === null) {
-            auditLogWebhookFailure('infisical', 'invalid_signature_format', [
-                'infisical_sync_config_uuid' => $config->uuid,
-            ]);
+            auditLogWebhookFailure('infisical', 'invalid_signature_format', ['uuid' => $uuid]);
 
             return response()->json(['status' => 'unauthorized', 'message' => 'Malformed signature.'], 401);
         }
 
         if ($timestamp !== null && abs(now()->timestamp - intdiv($timestamp, 1000)) > self::MAX_SIGNATURE_AGE_SECONDS) {
-            auditLogWebhookFailure('infisical', 'stale_signature', [
-                'infisical_sync_config_uuid' => $config->uuid,
-            ]);
+            auditLogWebhookFailure('infisical', 'stale_signature', ['uuid' => $uuid]);
 
             return response()->json(['status' => 'unauthorized', 'message' => 'Signature timestamp is too old.'], 401);
+        }
+
+        $config = InfisicalSyncConfig::where('uuid', $uuid)->first();
+        $secret = $config?->enabled ? $config->webhook_secret : null;
+
+        if (blank($secret)) {
+            if ($config?->enabled) {
+                auditLogWebhookFailure('infisical', 'webhook_secret_missing', [
+                    'infisical_sync_config_uuid' => $config->uuid,
+                ]);
+            }
+
+            return $this->ignored();
         }
 
         // Sign the raw bytes: the timestamp is already inside the body Infisical
@@ -75,7 +70,7 @@ class Infisical extends Controller
                 'infisical_sync_config_uuid' => $config->uuid,
             ]);
 
-            return response()->json(['status' => 'unauthorized', 'message' => 'Invalid signature.'], 401);
+            return $this->ignored();
         }
 
         if (! $this->payloadMatchesConfig($request, $config)) {
@@ -90,6 +85,15 @@ class Infisical extends Controller
         ]);
 
         return response()->json(['status' => 'queued', 'message' => 'Secret sync queued.']);
+    }
+
+    /**
+     * One indistinguishable answer for "unknown uuid", "disabled", "no secret
+     * configured" and "signature did not match".
+     */
+    private function ignored()
+    {
+        return response()->json(['status' => 'ignored', 'message' => 'Nothing to do.']);
     }
 
     /**

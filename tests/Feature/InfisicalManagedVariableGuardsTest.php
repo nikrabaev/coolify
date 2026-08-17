@@ -33,13 +33,18 @@ beforeEach(function () {
 
 function infisicalManagedVariable(array $attributes = []): EnvironmentVariable
 {
-    return EnvironmentVariable::create(array_merge([
+    $variable = EnvironmentVariable::create(array_merge([
         'key' => 'MANAGED_KEY',
         'value' => 'managed-value',
-        'is_managed_by_infisical' => true,
         'resourceable_type' => Application::class,
         'resourceable_id' => test()->application->id,
     ], $attributes));
+
+    // Not mass-assignable on purpose; see EnvironmentVariable::$fillable.
+    $variable->is_managed_by_infisical = true;
+    $variable->save();
+
+    return $variable;
 }
 
 it('marks a managed variable read-only in the row component', function () {

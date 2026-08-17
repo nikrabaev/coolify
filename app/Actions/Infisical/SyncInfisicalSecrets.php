@@ -40,6 +40,9 @@ class SyncInfisicalSecrets
 
     private const MAGIC_KEY_PREFIXES = ['SERVICE_FQDN', 'SERVICE_URL', 'SERVICE_NAME'];
 
+    /** Matches the length Coolify's own environment-variable key rules allow. */
+    private const MAX_KEY_LENGTH = 255;
+
     /**
      * @param  int  $lockWaitSeconds  How long to wait for a competing sync. Deployments
      *                                wait; background triggers skip rather than queue up.
@@ -63,6 +66,13 @@ class SyncInfisicalSecrets
 
         try {
             return $this->sync($config);
+        } catch (Throwable $e) {
+            // Anything that got past the fetch — a rejected insert, a rolled back
+            // transaction — must still leave the failure visible on the config
+            // rather than a stale "success" left over from the previous run.
+            $this->recordFailure($config, $e->getMessage());
+
+            throw $e instanceof InfisicalException ? $e : new InfisicalException($e->getMessage(), previous: $e);
         } finally {
             $lock->release();
         }
@@ -91,9 +101,7 @@ class SyncInfisicalSecrets
                 (bool) $config->recursive,
             );
         } catch (Throwable $e) {
-            $this->recordFailure($config, $e->getMessage());
-
-            throw $e instanceof InfisicalException ? $e : new InfisicalException($e->getMessage());
+            throw $e instanceof InfisicalException ? $e : new InfisicalException($e->getMessage(), previous: $e);
         }
 
         $skipped = [];
@@ -102,8 +110,11 @@ class SyncInfisicalSecrets
         foreach ($fetched['secrets'] as $rawKey => $value) {
             $key = ValidationPatterns::normalizeEnvironmentVariableKey((string) $rawKey);
 
-            if (blank($key) || preg_match(ValidationPatterns::ENVIRONMENT_VARIABLE_KEY_PATTERN, $key) !== 1) {
-                // The key mutator throws on these, so they must never reach the model.
+            // The key mutator throws on a bad pattern and Postgres rejects anything
+            // wider than the column, so neither may reach the model.
+            if (blank($key)
+                || mb_strlen($key) > self::MAX_KEY_LENGTH
+                || preg_match(ValidationPatterns::ENVIRONMENT_VARIABLE_KEY_PATTERN, $key) !== 1) {
                 $skipped[(string) $rawKey] = self::SKIP_INVALID_KEY;
 
                 continue;
@@ -116,7 +127,10 @@ class SyncInfisicalSecrets
                 continue;
             }
 
-            $desired[$key] = (string) $value;
+            // EnvironmentVariable trims on both read and write, so an untrimmed value
+            // here would never compare equal to what was stored: every sync would
+            // report an update and, with redeploy-on-change, redeploy forever.
+            $desired[$key] = trim((string) $value);
         }
 
         $created = 0;
@@ -200,8 +214,11 @@ class SyncInfisicalSecrets
                     );
 
                     if ($row) {
-                        if ($row->value !== $value) {
+                        $isMultiline = $this->isMultiline($value);
+
+                        if ($row->value !== $value || (bool) $row->is_multiline !== $isMultiline) {
                             $row->value = $value;
+                            $row->is_multiline = $isMultiline;
                             $row->save();
                             $updated++;
                         }
@@ -260,11 +277,22 @@ class SyncInfisicalSecrets
         return $resource instanceof Application ? [true, false] : [false];
     }
 
+    /**
+     * Coolify only quotes a value in the generated .env when it is flagged literal
+     * or multiline. Without this an SSH key or certificate would be written as bare
+     * lines and corrupt the file.
+     */
+    private function isMultiline(string $value): bool
+    {
+        return str_contains($value, "\n");
+    }
+
     private function createManagedVariable(Model $resource, string $key, string $value, bool $isPreview, int $order): void
     {
         $variable = new EnvironmentVariable;
         $variable->key = $key;
         $variable->value = $value;
+        $variable->is_multiline = $this->isMultiline($value);
         $variable->is_preview = $isPreview;
         $variable->is_runtime = true;
         $variable->is_buildtime = true;
