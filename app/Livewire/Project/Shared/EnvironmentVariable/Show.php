@@ -20,6 +20,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
+use Livewire\Attributes\Locked;
 use Livewire\Component;
 
 class Show extends Component
@@ -46,6 +47,11 @@ class Show extends Component
 
     public bool $isMagicVariable = false;
 
+    /**
+     * Display only. The guards below re-read the flag from the database, because a
+     * public Livewire property can be overwritten from the browser.
+     */
+    #[Locked]
     public bool $isManagedByInfisical = false;
 
     public bool $isSharedVariable = false;
@@ -288,11 +294,25 @@ class Show extends Component
         return auth()->user()?->cannot('update', $this->env) ?? true;
     }
 
+    /**
+     * Read the flag straight from the database. Component state can be tampered
+     * with from the browser, so it must never be what decides whether an
+     * Infisical-managed variable may be written to.
+     */
+    private function isInfisicalManaged(): bool
+    {
+        if ($this->isSharedVariable || ! $this->env->exists) {
+            return false;
+        }
+
+        return (bool) ModelsEnvironmentVariable::whereKey($this->env->getKey())->value('is_managed_by_infisical');
+    }
+
     public function checkEnvs()
     {
         $this->isDisabled = false;
         $this->isMagicVariable = false;
-        $this->isManagedByInfisical = (bool) ($this->env->is_managed_by_infisical ?? false);
+        $this->isManagedByInfisical = $this->isInfisicalManaged();
 
         if ($this->isManagedByInfisical) {
             $this->isDisabled = true;
@@ -317,7 +337,7 @@ class Show extends Component
     {
         $this->authorize('update', $this->env);
 
-        if ($this->isManagedByInfisical) {
+        if ($this->isInfisicalManaged()) {
             $this->dispatch('error', 'Infisical-managed variables cannot be locked.');
 
             return;
@@ -357,7 +377,7 @@ class Show extends Component
         try {
             $this->authorize('update', $this->env);
 
-            if ($this->isManagedByInfisical) {
+            if ($this->isInfisicalManaged()) {
                 $this->dispatch('error', 'This variable is managed by Infisical. Convert it to a manual variable on the Infisical tab to edit it.');
 
                 return;
@@ -582,7 +602,7 @@ class Show extends Component
         try {
             $this->authorize('delete', $this->env);
 
-            if ($this->isManagedByInfisical) {
+            if ($this->isInfisicalManaged()) {
                 $this->dispatch('error', 'This variable is managed by Infisical. Remove the secret in Infisical, or delete the sync configuration, instead.');
 
                 return;

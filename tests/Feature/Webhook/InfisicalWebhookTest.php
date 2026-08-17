@@ -82,20 +82,23 @@ it('queues a sync for a correctly signed payload', function () {
     });
 });
 
-it('rejects an invalid signature', function () {
+it('ignores an invalid signature', function () {
     $body = infisicalBody();
 
     postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, 'wrong-secret'))
-        ->assertStatus(401);
+        ->assertOk()
+        ->assertJsonPath('status', 'ignored');
 
     Queue::assertNotPushed(InfisicalSyncJob::class);
 });
 
-it('rejects a signature computed over a different body', function () {
+it('ignores a signature computed over a different body', function () {
     $signature = infisicalSignature(infisicalBody(), $this->webhookSecret);
     $tamperedBody = infisicalBody(['project' => ['secretPath' => '/tampered']]);
 
-    postInfisicalWebhook($this->config->uuid, $tamperedBody, $signature)->assertStatus(401);
+    postInfisicalWebhook($this->config->uuid, $tamperedBody, $signature)
+        ->assertOk()
+        ->assertJsonPath('status', 'ignored');
 
     Queue::assertNotPushed(InfisicalSyncJob::class);
 });
@@ -123,12 +126,34 @@ it('rejects a stale timestamp', function () {
     Queue::assertNotPushed(InfisicalSyncJob::class);
 });
 
-it('rejects when no webhook secret is configured', function () {
+it('ignores a configuration without a webhook secret', function () {
     $this->config->update(['webhook_secret' => null]);
     $body = infisicalBody();
 
     postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, 'anything'))
-        ->assertStatus(401);
+        ->assertOk()
+        ->assertJsonPath('status', 'ignored');
+
+    Queue::assertNotPushed(InfisicalSyncJob::class);
+});
+
+it('cannot be used to discover which configuration uuids exist', function () {
+    $body = infisicalBody();
+
+    // Every rejection an attacker without the secret can reach must look the same,
+    // whether the uuid exists, is disabled, has no secret, or the signature is wrong.
+    $wrongSecret = postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, 'guess'))->assertOk();
+    $unknownUuid = postInfisicalWebhook('does-not-exist', $body, infisicalSignature($body, 'guess'))->assertOk();
+
+    $this->config->update(['enabled' => false]);
+    $disabled = postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, 'guess'))->assertOk();
+
+    $this->config->update(['enabled' => true, 'webhook_secret' => null]);
+    $noSecret = postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, 'guess'))->assertOk();
+
+    expect($unknownUuid->json())->toBe($wrongSecret->json())
+        ->and($disabled->json())->toBe($wrongSecret->json())
+        ->and($noSecret->json())->toBe($wrongSecret->json());
 
     Queue::assertNotPushed(InfisicalSyncJob::class);
 });

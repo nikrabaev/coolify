@@ -200,10 +200,12 @@ it('deletes a connection and converts its synced variables to manual ones', func
     $managed = EnvironmentVariable::create([
         'key' => 'MANAGED_KEY',
         'value' => 'managed-value',
-        'is_managed_by_infisical' => true,
         'resourceable_type' => Service::class,
         'resourceable_id' => $service->id,
     ]);
+    // Not mass-assignable on purpose; see EnvironmentVariable::$fillable.
+    $managed->is_managed_by_infisical = true;
+    $managed->save();
 
     Livewire::test(InfisicalIntegrations::class)
         ->assertSee($integration->name)
