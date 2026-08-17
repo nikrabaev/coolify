@@ -119,18 +119,35 @@ class SyncInfisicalSecrets
         $created = 0;
         $updated = 0;
         $removed = 0;
+        $adopted = 0;
         $applied = [];
 
-        DB::transaction(function () use ($resource, $desired, &$skipped, &$created, &$updated, &$removed, &$applied) {
+        DB::transaction(function () use ($resource, $desired, &$skipped, &$created, &$updated, &$removed, &$adopted, &$applied) {
             $existing = EnvironmentVariable::where('resourceable_type', $resource->getMorphClass())
                 ->where('resourceable_id', $resource->getKey())
                 ->lockForUpdate()
                 ->get();
 
-            $manualKeys = $existing
-                ->filter(fn (EnvironmentVariable $env) => ! $env->is_managed_by_infisical)
+            $unmanaged = $existing->filter(fn (EnvironmentVariable $env) => ! $env->is_managed_by_infisical);
+
+            // Only a variable that actually holds a value counts as the user's own.
+            // Coolify's compose parser pre-creates empty rows for every ${VAR} it
+            // finds, and those placeholders are exactly what the secret should fill,
+            // so an empty row is adopted rather than treated as an override.
+            $manualKeys = $unmanaged
+                ->filter(fn (EnvironmentVariable $env) => filled($env->value))
                 ->pluck('key')
                 ->unique();
+
+            $adoptable = $unmanaged->filter(
+                fn (EnvironmentVariable $env) => array_key_exists($env->key, $desired) && ! $manualKeys->contains($env->key)
+            );
+
+            if ($adoptable->isNotEmpty()) {
+                EnvironmentVariable::whereIn('id', $adoptable->pluck('id'))->update(['is_managed_by_infisical' => true]);
+                $adopted = $adoptable->pluck('key')->unique()->count();
+                $adoptable->each(fn (EnvironmentVariable $env) => $env->is_managed_by_infisical = true);
+            }
 
             $managed = $existing->filter(fn (EnvironmentVariable $env) => (bool) $env->is_managed_by_infisical);
 
@@ -182,7 +199,7 @@ class SyncInfisicalSecrets
         ksort($applied);
         $hash = hash('sha256', json_encode($applied));
 
-        $changed = $hash !== $config->last_applied_hash || $created > 0 || $updated > 0 || $removed > 0;
+        $changed = $hash !== $config->last_applied_hash || $created > 0 || $updated > 0 || $removed > 0 || $adopted > 0;
 
         $config->forceFill([
             'last_synced_at' => now(),
@@ -193,6 +210,7 @@ class SyncInfisicalSecrets
                 'created' => $created,
                 'updated' => $updated,
                 'removed' => $removed,
+                'adopted' => $adopted,
                 'skipped' => $skipped,
                 'collisions' => $fetched['collisions'],
             ],
@@ -203,6 +221,7 @@ class SyncInfisicalSecrets
             'created' => $created,
             'updated' => $updated,
             'removed' => $removed,
+            'adopted' => $adopted,
             'skipped' => $skipped,
             'collisions' => $fetched['collisions'],
             'hash' => $hash,
@@ -255,6 +274,7 @@ class SyncInfisicalSecrets
             'created' => 0,
             'updated' => 0,
             'removed' => 0,
+            'adopted' => 0,
             'skipped' => [],
             'collisions' => [],
             'hash' => '',
