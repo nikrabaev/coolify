@@ -18,6 +18,7 @@ jobs:
     # UNPRIVILEGED. Reads upstream PR state and reports. No secrets, no
     # credentials, and nothing from an unpinned PR head is ever executed here.
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: read
       # Pin-update and PR-lifecycle proposals are filed as issues, so this must
@@ -28,12 +29,12 @@ jobs:
     outputs:
       report: ${{ steps.classify.outputs.report }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: fork-main
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
 
@@ -60,6 +61,10 @@ jobs:
     # QEMU emulation — a earlier run exceeded two hours and was still going.
     # arm64 runners are free for public repositories.
     runs-on: ubuntu-24.04-arm
+    # Bounded so a hung build cannot occupy the concurrency group indefinitely;
+    # cancel-in-progress is false, so a stuck run would block every later one.
+    # A healthy native-arm64 release completes in roughly 10-15 minutes.
+    timeout-minutes: 45
     # actions/deploy-pages requires its job to target the github-pages
     # environment; without this the deploy fails at runtime.
     environment: github-pages
@@ -70,7 +75,7 @@ jobs:
       id-token: write
       issues: write # failures are escalated as issues
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           ref: fork-main
           fetch-depth: 0
@@ -81,7 +86,7 @@ jobs:
           # .github/workflows/ — even with FORK_SYNC_TOKEN configured.
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '24'
 
@@ -125,11 +130,21 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-      - name: Restore rerere cache
-        run: |
-          mkdir -p .git/rr-cache
-          cp -r state/rr-cache/. .git/rr-cache/ 2>/dev/null || true
-          git config rerere.enabled true
+      # rerere is deliberately NOT enabled, and state/rr-cache is not restored.
+      #
+      # It was originally enabled to avoid re-resolving the same conflict on
+      # every release. But rerere replays a recorded resolution onto a *new*
+      # upstream base with no re-review and no signal in the merge output: a
+      # resolution that was correct for v4.3.2 and wrong for v4.4.0 would merge
+      # clean and ship. That silently violates the property this whole design
+      # rests on — that only human-reviewed content reaches the image. There is
+      # no way to keep rerere's recording while disabling its replay, so it is
+      # off. Conflicts now always halt the run and escalate with the conflicting
+      # paths, and a human resolves them. Conflicts should be rare: the patch
+      # set is small, and the cost of re-resolving one is far below the cost of
+      # shipping an unreviewed merge.
+      - name: Ensure rerere is off
+        run: git config rerere.enabled false
 
       - name: Resolve base tag and fingerprint
         id: fp
@@ -167,7 +182,7 @@ jobs:
       # failure delta, not a bare suite run.
       #
       # PHP is still needed below for the version-stamp guard.
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
         if: steps.fp.outputs.changed == 'true'
         with:
           php-version: '8.4'
@@ -208,17 +223,17 @@ jobs:
           # buildVersionsForkJson in fork/bin/publish.mjs.
           node fork/bin/publish.mjs assemble-site
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
         if: steps.fp.outputs.changed == 'true'
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         if: steps.fp.outputs.changed == 'true'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         if: steps.fp.outputs.changed == 'true'
         with:
           context: .build
@@ -242,12 +257,12 @@ jobs:
       # twice on purpose (versions.json is withheld from the first deploy).
       - name: Publish artifacts (versions.json withheld)
         if: steps.fp.outputs.changed == 'true'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: site
           name: github-pages-artifacts
 
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
         if: steps.fp.outputs.changed == 'true'
         with:
           artifact_name: github-pages-artifacts
@@ -305,12 +320,12 @@ jobs:
 
       - name: Publish versions.json (advertises the release)
         if: steps.fp.outputs.changed == 'true'
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: site
           name: github-pages-advertised
 
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
         if: steps.fp.outputs.changed == 'true'
         with:
           artifact_name: github-pages-advertised
@@ -341,7 +356,6 @@ jobs:
                 version: process.env.VERSION,
               }))
           "
-          cp -r .git/rr-cache/. state/rr-cache/ 2>/dev/null || true
           git add state/
           git commit -qm "chore(fork): record ${VERSION} [skip ci]" || true
           git push --quiet origin HEAD:fork-main
@@ -361,9 +375,26 @@ jobs:
             --repo "${{ github.repository }}" \
             --description "Automated fork-sync notifications" \
             --color ededed || true
+          # Deduplicate before filing. A stuck conflict or a persistently broken
+          # base tag fails on every daily run; without this check that is one new
+          # issue per day forever. Exact-title match on open fork-sync issues,
+          # mirroring isAlreadyFiled() in fork/bin/probe-cli.mjs — deliberately
+          # not `--search`, whose tokenizer is unreliable for titles containing
+          # ':' and '#'.
+          # export, not a bare shell var: --jq reads env.TITLE from the process
+          # environment, so an unexported variable would compare against null
+          # and never match, silently defeating the dedup.
+          export TITLE="fork-sync failed on ${BASE_TAG}"
+          EXISTING=$(gh issue list --repo "${{ github.repository }}" \
+            --label fork-sync --state open --json title --limit 200 \
+            --jq '[.[] | select(.title == env.TITLE)] | length' 2>/dev/null || echo 0)
+          if [ "${EXISTING:-0}" != "0" ]; then
+            echo "An open issue titled \"${TITLE}\" already exists; not filing a duplicate."
+            exit 0
+          fi
           gh issue create \
             --repo "${{ github.repository }}" \
-            --title "fork-sync failed on ${BASE_TAG}" \
+            --title "${TITLE}" \
             --label fork-sync \
             --body "$(printf '%s\n' \
               "The scheduled fork-sync run failed." \
