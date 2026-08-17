@@ -8,6 +8,7 @@ use App\Models\EnvironmentVariable;
 use App\Models\InfisicalSyncConfig;
 use App\Services\Infisical\InfisicalService;
 use App\Support\ValidationPatterns;
+use App\Traits\EnvironmentVariableProtection;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Cache;
@@ -25,13 +26,15 @@ use Throwable;
  */
 class SyncInfisicalSecrets
 {
-    use AsAction;
+    use AsAction, EnvironmentVariableProtection;
 
     public const SKIP_INVALID_KEY = 'invalid-key';
 
     public const SKIP_MANUAL_OVERRIDE = 'manual-override';
 
     public const SKIP_COOLIFY_MAGIC = 'coolify-magic';
+
+    public const SKIP_COMPOSE_REFERENCE = 'compose-reference';
 
     private const LOCK_SECONDS = 120;
 
@@ -153,14 +156,30 @@ class SyncInfisicalSecrets
 
             // Drop managed rows whose secret disappeared from Infisical, and any
             // managed row whose key the user has since taken over by hand.
-            $staleIds = $managed
-                ->filter(fn (EnvironmentVariable $env) => ! array_key_exists($env->key, $desired) || $manualKeys->contains($env->key))
-                ->pluck('id');
+            $stale = $managed->filter(
+                fn (EnvironmentVariable $env) => ! array_key_exists($env->key, $desired) || $manualKeys->contains($env->key)
+            );
 
-            if ($staleIds->isNotEmpty()) {
-                $removed = EnvironmentVariable::whereIn('id', $staleIds)->delete();
-                $managed = $managed->reject(fn (EnvironmentVariable $env) => $staleIds->contains($env->id));
+            // Deleting a variable the compose file still references would break the
+            // next deployment, which is why Coolify's own UI refuses to do it. Hand
+            // those back to the user as manual variables instead of removing them.
+            [$keep, $delete] = $stale->partition(
+                fn (EnvironmentVariable $env) => ! $manualKeys->contains($env->key)
+                    && $this->isReferencedByComposeFile($resource, $env->key)
+            );
+
+            if ($keep->isNotEmpty()) {
+                EnvironmentVariable::whereIn('id', $keep->pluck('id'))->update(['is_managed_by_infisical' => false]);
+                foreach ($keep->pluck('key')->unique() as $key) {
+                    $skipped[$key] = self::SKIP_COMPOSE_REFERENCE;
+                }
             }
+
+            if ($delete->isNotEmpty()) {
+                $removed = EnvironmentVariable::whereIn('id', $delete->pluck('id'))->delete();
+            }
+
+            $managed = $managed->reject(fn (EnvironmentVariable $env) => $stale->contains('id', $env->id));
 
             $order = (int) EnvironmentVariable::where('resourceable_type', $resource->getMorphClass())
                 ->where('resourceable_id', $resource->getKey())
@@ -254,6 +273,22 @@ class SyncInfisicalSecrets
         $variable->resourceable_id = $resource->getKey();
         $variable->resourceable_type = $resource->getMorphClass();
         $variable->save();
+    }
+
+    /**
+     * Reuses the same check the environment-variable UI uses before allowing a delete.
+     */
+    private function isReferencedByComposeFile(Model $resource, string $key): bool
+    {
+        $compose = $resource->docker_compose ?? null;
+
+        if (blank($compose)) {
+            return false;
+        }
+
+        [$isUsed] = $this->isEnvironmentVariableUsedInDockerCompose($key, $compose);
+
+        return $isUsed;
     }
 
     private function recordFailure(InfisicalSyncConfig $config, string $message): void

@@ -203,6 +203,49 @@ it('fills the empty placeholder rows a compose file creates', function () {
     expect($service->environment_variables()->where('key', 'DATABASE_PASSWORD')->count())->toBe(1);
 });
 
+it('keeps a variable the compose file still references instead of deleting it', function () {
+    $service = infisicalSyncService();
+    $service->update(['docker_compose' => <<<'YAML'
+services:
+  app:
+    image: nginx
+    environment:
+      - DATABASE_URL=$DATABASE_URL
+YAML]);
+
+    fakeInfisicalSecrets(['DATABASE_URL' => 'postgres://from-infisical']);
+    $config = infisicalSyncConfigFor($service);
+    SyncInfisicalSecrets::run($config);
+
+    // The secret is removed from Infisical; deleting the row would break the
+    // compose file, so it must be handed back as a manual variable instead.
+    fakeInfisicalSecrets([]);
+    $result = SyncInfisicalSecrets::run($config->fresh());
+
+    expect($result['removed'])->toBe(0);
+    expect($result['skipped']['DATABASE_URL'])->toBe(SyncInfisicalSecrets::SKIP_COMPOSE_REFERENCE);
+
+    $variable = $service->environment_variables()->where('key', 'DATABASE_URL')->first();
+    expect($variable)->not->toBeNull();
+    expect($variable->is_managed_by_infisical)->toBeFalse();
+    expect($variable->value)->toBe('postgres://from-infisical');
+});
+
+it('still deletes a removed secret that the compose file does not reference', function () {
+    $service = infisicalSyncService();
+    $service->update(['docker_compose' => "services:\n  app:\n    image: nginx\n"]);
+
+    fakeInfisicalSecrets(['UNUSED_KEY' => 'v']);
+    $config = infisicalSyncConfigFor($service);
+    SyncInfisicalSecrets::run($config);
+
+    fakeInfisicalSecrets([]);
+    $result = SyncInfisicalSecrets::run($config->fresh());
+
+    expect($result['removed'])->toBe(1);
+    expect($service->environment_variables()->where('key', 'UNUSED_KEY')->exists())->toBeFalse();
+});
+
 it('never adopts a placeholder that the user has filled in', function () {
     $service = infisicalSyncService();
     EnvironmentVariable::create([
