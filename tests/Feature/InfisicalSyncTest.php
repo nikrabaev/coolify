@@ -1,0 +1,331 @@
+<?php
+
+use App\Actions\Infisical\SyncInfisicalSecrets;
+use App\Exceptions\InfisicalException;
+use App\Models\Application;
+use App\Models\Environment;
+use App\Models\EnvironmentVariable;
+use App\Models\InfisicalIntegration;
+use App\Models\InfisicalSyncConfig;
+use App\Models\InstanceSettings;
+use App\Models\Project;
+use App\Models\Service;
+use App\Models\Team;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
+
+uses(RefreshDatabase::class);
+
+beforeEach(function () {
+    InstanceSettings::forceCreate(['id' => 0]);
+
+    $this->team = Team::factory()->create();
+    $this->project = Project::factory()->create(['team_id' => $this->team->id]);
+    $this->environment = Environment::factory()->create(['project_id' => $this->project->id]);
+
+    $this->integration = InfisicalIntegration::factory()->create(['team_id' => $this->team->id]);
+
+    // Http::fake() merges stubs rather than replacing them, so register one
+    // dynamic stub here and let fakeInfisicalSecrets() swap the payload it returns.
+    $this->infisicalPayload = ['secrets' => [], 'imports' => []];
+    $this->infisicalLoginStatus = 200;
+    Http::fake([
+        '*/api/v1/auth/universal-auth/login' => fn () => $this->infisicalLoginStatus === 200
+            ? Http::response(['accessToken' => 'test-access-token', 'expiresIn' => 3600, 'tokenType' => 'Bearer'])
+            : Http::response(['message' => 'Invalid credentials'], $this->infisicalLoginStatus),
+        '*/api/v3/secrets/raw*' => fn () => Http::response($this->infisicalPayload),
+    ]);
+});
+
+/**
+ * Set what the secrets endpoint returns. $secrets is a plain key => value map.
+ */
+function fakeInfisicalSecrets(array $secrets, array $imports = []): void
+{
+    test()->infisicalPayload = [
+        'secrets' => collect($secrets)->map(fn ($value, $key) => [
+            'secretKey' => $key,
+            'secretValue' => $value,
+            'type' => 'shared',
+            'secretPath' => '/',
+        ])->values()->all(),
+        'imports' => $imports,
+    ];
+}
+
+function infisicalSyncApplication(): Application
+{
+    $application = Application::factory()->create(['environment_id' => test()->environment->id]);
+
+    // Coolify seeds NIXPACKS_* variables on creation; clear them so each test
+    // starts from a known set. A dedicated test below covers that behaviour.
+    $application->environment_variables()->delete();
+    $application->environment_variables_preview()->delete();
+
+    return $application->refresh();
+}
+
+function infisicalSyncService(): Service
+{
+    return Service::factory()->create(['environment_id' => test()->environment->id]);
+}
+
+function infisicalSyncConfigFor($resource, array $attributes = []): InfisicalSyncConfig
+{
+    return InfisicalSyncConfig::factory()->create(array_merge([
+        'infisical_integration_id' => test()->integration->id,
+        'resourceable_type' => $resource->getMorphClass(),
+        'resourceable_id' => $resource->id,
+    ], $attributes));
+}
+
+it('creates managed variables for both application scopes', function () {
+    fakeInfisicalSecrets(['API_KEY' => 'secret-value', 'DB_HOST' => 'db.internal']);
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+
+    $result = SyncInfisicalSecrets::run($config);
+
+    expect($result['changed'])->toBeTrue();
+    expect($result['created'])->toBe(4); // 2 keys x (preview + production)
+
+    $production = $application->environment_variables()->get();
+    expect($production->pluck('key')->sort()->values()->all())->toBe(['API_KEY', 'DB_HOST']);
+    expect($production->every(fn ($env) => $env->is_managed_by_infisical))->toBeTrue();
+    expect($production->firstWhere('key', 'API_KEY')->value)->toBe('secret-value');
+
+    $preview = $application->environment_variables_preview()->get();
+    expect($preview->pluck('key')->sort()->values()->all())->toBe(['API_KEY', 'DB_HOST']);
+    expect($preview->every(fn ($env) => $env->is_managed_by_infisical))->toBeTrue();
+});
+
+it('creates only one scope for services', function () {
+    fakeInfisicalSecrets(['API_KEY' => 'secret-value']);
+    $service = infisicalSyncService();
+    $config = infisicalSyncConfigFor($service);
+
+    $result = SyncInfisicalSecrets::run($config);
+
+    expect($result['created'])->toBe(1);
+    expect($service->environment_variables()->count())->toBe(1);
+    expect($service->environment_variables()->first()->is_managed_by_infisical)->toBeTrue();
+});
+
+it('is idempotent and reports no change on an unchanged re-sync', function () {
+    fakeInfisicalSecrets(['API_KEY' => 'secret-value']);
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+
+    SyncInfisicalSecrets::run($config);
+    $second = SyncInfisicalSecrets::run($config->fresh());
+
+    expect($second['changed'])->toBeFalse();
+    expect($second['created'])->toBe(0);
+    expect($second['updated'])->toBe(0);
+    expect($application->environment_variables()->count())->toBe(1);
+});
+
+it('updates a managed value when the secret changes', function () {
+    fakeInfisicalSecrets(['API_KEY' => 'old-value']);
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+    SyncInfisicalSecrets::run($config);
+
+    fakeInfisicalSecrets(['API_KEY' => 'new-value']);
+    $result = SyncInfisicalSecrets::run($config->fresh());
+
+    expect($result['changed'])->toBeTrue();
+    expect($result['updated'])->toBe(2); // both scopes
+    expect($application->environment_variables()->first()->value)->toBe('new-value');
+});
+
+it('removes managed variables whose secret disappeared', function () {
+    fakeInfisicalSecrets(['API_KEY' => 'a', 'GONE' => 'b']);
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+    SyncInfisicalSecrets::run($config);
+
+    fakeInfisicalSecrets(['API_KEY' => 'a']);
+    $result = SyncInfisicalSecrets::run($config->fresh());
+
+    expect($result['removed'])->toBe(2);
+    expect($application->environment_variables()->pluck('key')->all())->toBe(['API_KEY']);
+});
+
+it('never touches a manually created variable and skips its key', function () {
+    $application = infisicalSyncApplication();
+    EnvironmentVariable::create([
+        'key' => 'API_KEY',
+        'value' => 'hand-written',
+        'resourceable_type' => Application::class,
+        'resourceable_id' => $application->id,
+    ]);
+
+    fakeInfisicalSecrets(['API_KEY' => 'from-infisical', 'OTHER' => 'x']);
+    $config = infisicalSyncConfigFor($application);
+    $result = SyncInfisicalSecrets::run($config);
+
+    expect($result['skipped']['API_KEY'])->toBe(SyncInfisicalSecrets::SKIP_MANUAL_OVERRIDE);
+
+    $manual = $application->environment_variables()->where('key', 'API_KEY')->first();
+    expect($manual->value)->toBe('hand-written');
+    expect($manual->is_managed_by_infisical)->toBeFalse();
+
+    // The manual row must remain the only row for that key.
+    expect(EnvironmentVariable::where('resourceable_id', $application->id)->where('key', 'API_KEY')->count())->toBe(2); // prod + auto preview clone
+    expect(EnvironmentVariable::where('resourceable_id', $application->id)->where('key', 'API_KEY')->where('is_managed_by_infisical', true)->count())->toBe(0);
+});
+
+it('hands a key back to the user when they take it over by hand', function () {
+    fakeInfisicalSecrets(['API_KEY' => 'from-infisical']);
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+    SyncInfisicalSecrets::run($config);
+
+    // The user converts it to a manual variable in one scope.
+    EnvironmentVariable::where('resourceable_id', $application->id)
+        ->where('key', 'API_KEY')
+        ->update(['is_managed_by_infisical' => false]);
+
+    $result = SyncInfisicalSecrets::run($config->fresh());
+
+    expect($result['skipped']['API_KEY'])->toBe(SyncInfisicalSecrets::SKIP_MANUAL_OVERRIDE);
+    expect(EnvironmentVariable::where('resourceable_id', $application->id)->where('is_managed_by_infisical', true)->count())->toBe(0);
+});
+
+it('skips keys Coolify cannot store and reports why', function () {
+    fakeInfisicalSecrets([
+        'GOOD_KEY' => 'ok',
+        'bad-key-with-hyphens' => 'nope',
+        '9STARTS_WITH_DIGIT' => 'nope',
+        'SERVICE_FQDN_APP' => 'nope',
+    ]);
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+
+    $result = SyncInfisicalSecrets::run($config);
+
+    expect($result['skipped']['bad-key-with-hyphens'])->toBe(SyncInfisicalSecrets::SKIP_INVALID_KEY);
+    expect($result['skipped']['9STARTS_WITH_DIGIT'])->toBe(SyncInfisicalSecrets::SKIP_INVALID_KEY);
+    expect($result['skipped']['SERVICE_FQDN_APP'])->toBe(SyncInfisicalSecrets::SKIP_COOLIFY_MAGIC);
+    expect($application->environment_variables()->pluck('key')->all())->toBe(['GOOD_KEY']);
+});
+
+it('leaves Coolify-generated buildpack variables alone', function () {
+    $application = Application::factory()->create(['environment_id' => test()->environment->id]);
+    $generated = $application->environment_variables()->get();
+    expect($generated)->not->toBeEmpty(); // NIXPACKS_* seeded by Coolify
+
+    fakeInfisicalSecrets(['API_KEY' => 'v']);
+    $config = infisicalSyncConfigFor($application);
+    SyncInfisicalSecrets::run($config);
+
+    foreach ($generated as $env) {
+        $still = EnvironmentVariable::find($env->id);
+        expect($still)->not->toBeNull();
+        expect($still->is_managed_by_infisical)->toBeFalse();
+    }
+});
+
+it('lets directly defined secrets win over imported ones', function () {
+    fakeInfisicalSecrets(['SHARED' => 'direct-wins'], [
+        [
+            'secretPath' => '/base',
+            'environment' => 'prod',
+            'secrets' => [
+                ['secretKey' => 'SHARED', 'secretValue' => 'import-loses', 'type' => 'shared'],
+                ['secretKey' => 'ONLY_IMPORTED', 'secretValue' => 'imported', 'type' => 'shared'],
+            ],
+        ],
+    ]);
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+
+    SyncInfisicalSecrets::run($config);
+
+    expect($application->environment_variables()->where('key', 'SHARED')->first()->value)->toBe('direct-wins');
+    expect($application->environment_variables()->where('key', 'ONLY_IMPORTED')->first()->value)->toBe('imported');
+});
+
+it('lets the last import win over earlier ones', function () {
+    fakeInfisicalSecrets([], [
+        [
+            'secretPath' => '/first',
+            'environment' => 'prod',
+            'secrets' => [['secretKey' => 'DUPE', 'secretValue' => 'first', 'type' => 'shared']],
+        ],
+        [
+            'secretPath' => '/second',
+            'environment' => 'prod',
+            'secrets' => [['secretKey' => 'DUPE', 'secretValue' => 'second', 'type' => 'shared']],
+        ],
+    ]);
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+
+    SyncInfisicalSecrets::run($config);
+
+    expect($application->environment_variables()->where('key', 'DUPE')->first()->value)->toBe('second');
+});
+
+it('ignores personal secret overrides', function () {
+    $this->infisicalPayload = [
+        'secrets' => [
+            ['secretKey' => 'SHARED_ONLY', 'secretValue' => 'shared-value', 'type' => 'shared', 'secretPath' => '/'],
+            ['secretKey' => 'PERSONAL', 'secretValue' => 'personal-value', 'type' => 'personal', 'secretPath' => '/'],
+        ],
+        'imports' => [],
+    ];
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+
+    SyncInfisicalSecrets::run($config);
+
+    expect($application->environment_variables()->pluck('key')->all())->toBe(['SHARED_ONLY']);
+});
+
+it('records a failure on the config and rethrows when Infisical errors', function () {
+    $this->infisicalLoginStatus = 401;
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+
+    expect(fn () => SyncInfisicalSecrets::run($config))->toThrow(InfisicalException::class);
+
+    $config->refresh();
+    expect($config->last_sync_status)->toBe('failed');
+    expect($config->last_sync_report['error'])->toContain('credentials');
+});
+
+it('skips instead of queueing when another sync holds the lock', function () {
+    fakeInfisicalSecrets(['API_KEY' => 'v']);
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+
+    $lock = Cache::lock($config->lockKey(), 60);
+    $lock->get();
+
+    try {
+        $result = SyncInfisicalSecrets::run($config);
+        expect($result['locked_out'])->toBeTrue();
+        expect($result['changed'])->toBeFalse();
+        expect($application->environment_variables()->count())->toBe(0);
+    } finally {
+        $lock->release();
+    }
+});
+
+it('writes a sync report without leaking secret values', function () {
+    fakeInfisicalSecrets(['API_KEY' => 'super-secret-value']);
+    $application = infisicalSyncApplication();
+    $config = infisicalSyncConfigFor($application);
+
+    SyncInfisicalSecrets::run($config);
+    $config->refresh();
+
+    expect($config->last_sync_status)->toBe('success');
+    expect($config->last_sync_report['applied'])->toBe(1);
+    expect(json_encode($config->last_sync_report))->not->toContain('super-secret-value');
+    expect($config->last_applied_hash)->not->toBeEmpty();
+    expect($config->last_synced_at)->not->toBeNull();
+});

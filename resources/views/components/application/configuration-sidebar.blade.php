@@ -35,6 +35,11 @@
                 'active' => $currentRoute === 'project.application.environment-variables',
             ],
             [
+                'label' => 'Infisical',
+                'route' => 'project.application.infisical',
+                'active' => $currentRoute === 'project.application.infisical',
+            ],
+            [
                 'label' => 'Persistent Storage',
                 'route' => 'project.application.persistent-storage',
                 'active' => $currentRoute === 'project.application.persistent-storage',
@@ -160,7 +165,7 @@
 
         // Discord-style groups for the settings sidebar
         $menuGroups = [
-            'Settings' => ['General', 'Domains', 'Environment Variables', 'Persistent Storage', 'Advanced', 'Swarm', 'Healthcheck'],
+            'Settings' => ['General', 'Domains', 'Environment Variables', 'Infisical', 'Persistent Storage', 'Advanced', 'Swarm', 'Healthcheck'],
             'Observe & troubleshoot' => ['Runtime Logs', 'Deployment Logs', 'Terminal', 'Metrics'],
             'Deploy' => ['Git Source', 'Servers', 'Preview Deployments'],
             'Automation' => ['Scheduled Tasks', 'Webhooks', 'Backups'],
