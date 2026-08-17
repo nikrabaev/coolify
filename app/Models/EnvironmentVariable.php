@@ -97,6 +97,7 @@ class EnvironmentVariable extends BaseModel
         'is_shown_once',
         'is_shared',
         'is_required',
+        'is_managed_by_infisical',
 
         // Metadata
         'version',
@@ -113,6 +114,7 @@ class EnvironmentVariable extends BaseModel
         'is_runtime' => 'boolean',
         'is_buildtime' => 'boolean',
         'uses_legacy_escaping' => 'boolean',
+        'is_managed_by_infisical' => 'boolean',
         'version' => 'string',
         'resourceable_type' => 'string',
         'resourceable_id' => 'integer',
@@ -156,6 +158,7 @@ class EnvironmentVariable extends BaseModel
                             'is_required' => $environment_variable->is_required ?? false,
                             'is_shown_once' => $environment_variable->is_shown_once ?? false,
                             'comment' => $environment_variable->comment,
+                            'is_managed_by_infisical' => $environment_variable->is_managed_by_infisical ?? false,
                             'resourceable_type' => Application::class,
                             'resourceable_id' => $environment_variable->resourceable_id,
                             'is_preview' => true,
