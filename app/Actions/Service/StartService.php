@@ -2,6 +2,7 @@
 
 namespace App\Actions\Service;
 
+use App\Actions\Infisical\InfisicalDeploymentSync;
 use App\Models\Service;
 use Lorisleiva\Actions\Concerns\AsAction;
 use Lorisleiva\Actions\Decorators\JobDecorator;
@@ -18,6 +19,7 @@ class StartService
 
     public function handle(Service $service, bool $pullLatestImages = false, bool $stopBeforeStart = false)
     {
+        InfisicalDeploymentSync::run($service);
         $service->parse();
         if ($this->shouldStopBeforeStarting($pullLatestImages, $stopBeforeStart)) {
             StopService::run(service: $service, dockerCleanup: false);

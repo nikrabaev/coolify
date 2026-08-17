@@ -49,6 +49,7 @@ use App\Livewire\Security\CloudInitScript\Show as SecurityCloudInitScriptShow;
 use App\Livewire\Security\CloudInitScripts;
 use App\Livewire\Security\CloudProviderToken\Show as SecurityCloudProviderTokenShow;
 use App\Livewire\Security\CloudTokens;
+use App\Livewire\Security\InfisicalTokens;
 use App\Livewire\Security\PrivateKey\Index as SecurityPrivateKeyIndex;
 use App\Livewire\Security\PrivateKey\Show as SecurityPrivateKeyShow;
 use App\Livewire\Server\Advanced as ServerAdvanced;
@@ -268,6 +269,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/swarm', ApplicationConfiguration::class)->name('project.application.swarm');
         Route::get('/advanced', ApplicationConfiguration::class)->name('project.application.advanced');
         Route::get('/environment-variables', ApplicationConfiguration::class)->name('project.application.environment-variables');
+        Route::get('/infisical', ApplicationConfiguration::class)->name('project.application.infisical');
         Route::get('/persistent-storage', ApplicationConfiguration::class)->name('project.application.persistent-storage');
         Route::get('/backups', ApplicationBackupIndex::class)->name('project.application.backup.index');
         Route::get('/backups/{backup_uuid}', ApplicationBackupShow::class)->name('project.application.backup.show');
@@ -322,6 +324,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('/domains', ServiceConfiguration::class)->name('project.service.domains');
         Route::get('/logs', Logs::class)->name('project.service.logs');
         Route::get('/environment-variables', ServiceConfiguration::class)->name('project.service.environment-variables');
+        Route::get('/infisical', ServiceConfiguration::class)->name('project.service.infisical');
         Route::get('/storages', ServiceConfiguration::class)->name('project.service.storages');
         Route::get('/import-backup', ServiceImportBackup::class)->name('project.service.import-backup')->middleware('can.update.resource');
         Route::get('/import-backup/{stack_service_uuid}', ServiceImportBackup::class)->name('project.service.import-backup.database')->middleware('can.update.resource');
@@ -394,6 +397,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('/security/cloud-tokens/{cloud_token_uuid}', SecurityCloudProviderTokenShow::class)->name('security.cloud-tokens.show');
     Route::get('/security/cloud-init-scripts', CloudInitScripts::class)->name('security.cloud-init-scripts');
     Route::get('/security/cloud-init-scripts/{cloud_init_script_uuid}', SecurityCloudInitScriptShow::class)->name('security.cloud-init-scripts.show');
+    Route::get('/security/infisical', InfisicalTokens::class)->name('security.infisical');
     Route::get('/security/api-tokens', ApiTokens::class)->name('security.api-tokens');
 });
 

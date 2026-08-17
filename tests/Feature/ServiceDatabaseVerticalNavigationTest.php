@@ -58,7 +58,7 @@ it('groups database and service navigation by user workflow', function () {
 
     foreach ($serviceSidebars as $serviceSidebar) {
         expect($serviceSidebar)
-            ->toContain("'Settings' => ['General', 'Domains', 'Environment Variables', 'Persistent Storage']")
+            ->toContain("'Settings' => ['General', 'Domains', 'Environment Variables', 'Infisical', 'Persistent Storage']")
             ->toContain("'Observe & troubleshoot' => ['Runtime Logs', 'Terminal']")
             ->toContain("'Automation' => ['Scheduled Tasks', 'Webhooks', 'Backups', 'Import Backup']")
             ->toContain("'Operations' => ['Resource Operations', 'Tags', 'Danger Zone']");
@@ -69,7 +69,7 @@ it('groups application navigation by user workflow', function () {
     $application = file_get_contents(resource_path('views/components/application/configuration-sidebar.blade.php'));
 
     expect($application)
-        ->toContain("'Settings' => ['General', 'Domains', 'Environment Variables', 'Persistent Storage', 'Advanced', 'Swarm', 'Healthcheck']")
+        ->toContain("'Settings' => ['General', 'Domains', 'Environment Variables', 'Infisical', 'Persistent Storage', 'Advanced', 'Swarm', 'Healthcheck']")
         ->toContain("'Observe & troubleshoot' => ['Runtime Logs', 'Deployment Logs', 'Terminal', 'Metrics']")
         ->toContain("'Deploy' => ['Git Source', 'Servers', 'Preview Deployments']")
         ->toContain("'Automation' => ['Scheduled Tasks', 'Webhooks', 'Backups']")
