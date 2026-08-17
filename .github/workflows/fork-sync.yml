@@ -135,24 +135,6 @@ jobs:
         id: fp
         run: node fork/bin/fingerprint-cli.mjs
 
-      - name: Mirror upstream's default branch
-        # Convenience only — the build is driven by release tags, never by this
-        # branch. A mirroring failure must not block a release, so this step is
-        # allowed to fail visibly rather than abort the job.
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Resolve the branch name rather than hardcoding it: upstream renamed
-          # v4.x to main, which broke the previous hardcoded fetch. Asking for the
-          # current default survives the next rename too.
-          BRANCH=$(gh api repos/coollabsio/coolify -q .default_branch)
-          echo "mirroring upstream default branch: ${BRANCH}"
-          # fingerprint-cli guarantees an `upstream` remote exists (it adds one
-          # by URL when missing). `origin` is the fork: actions/checkout made it so.
-          git fetch --quiet upstream "${BRANCH}"
-          git push --quiet --force origin "refs/remotes/upstream/${BRANCH}:refs/heads/${BRANCH}"
-
       - name: Stop if nothing changed
         if: steps.fp.outputs.changed != 'true'
         run: echo "Fingerprint unchanged; nothing to build."
@@ -303,9 +285,21 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          # Tag and prod come from the built worktree HEAD; origin is the fork.
+          # The tag comes from the built worktree HEAD; origin is the fork. It is
+          # both the version-allocation record and the audit trail — it points at
+          # the exact tree that was built and published.
+          #
+          # Deliberately NOT pushing a `prod` branch, and deliberately not
+          # mirroring upstream's default branch either. Both refs carry upstream's
+          # own workflow files, and upstream's workflows trigger on pushes to
+          # `main` (coolify-sha-build, coolify-helper, coolify-realtime,
+          # generate-changelog) and, via branches-ignore, to any other branch such
+          # as `prod` (coolify-staging-build). Those then fail daily on a missing
+          # DOCKERHUB_* secret. Disabling them does not stick: the files are not on
+          # the default branch, so GitHub recreates the workflow record — enabled —
+          # each time a push triggers it. None of them trigger on tags, so pushing
+          # only the tag keeps the record and the audit trail without the noise.
           git -C .build push --quiet origin "HEAD:refs/tags/${VERSION}"
-          git -C .build push --quiet --force origin HEAD:prod
           # versions.json becomes visible only now — it is the release pointer.
           cp versions.fork.json site/versions.json
 
