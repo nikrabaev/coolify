@@ -93,6 +93,16 @@ class TriggerInfisicalRedeploy
         $report = $config->last_sync_report ?? [];
         $report['redeploy'] = $outcome;
 
-        $config->forceFill(['last_sync_report' => $report])->save();
+        $attributes = ['last_sync_report' => $report];
+
+        if (in_array($outcome['status'], ['queue_full', 'failed'], true)) {
+            // The secrets are applied but the containers still run the old ones.
+            // Clearing the applied hash makes the next sync report a change again,
+            // so the redeploy is retried instead of being lost until the next
+            // secret rotation.
+            $attributes['last_applied_hash'] = null;
+        }
+
+        $config->forceFill($attributes)->save();
     }
 }
