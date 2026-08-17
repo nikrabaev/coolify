@@ -2,6 +2,7 @@
 
 namespace App\Actions\Service;
 
+use App\Actions\Infisical\InfisicalDeploymentSync;
 use App\Actions\Shared\EnsureContentFilesOnServer;
 use App\Models\LocalFileVolume;
 use App\Models\Service;
@@ -22,6 +23,7 @@ class StartService
 
     public function handle(Service $service, bool $pullLatestImages = false, bool $stopBeforeStart = false)
     {
+        InfisicalDeploymentSync::run($service);
         $service->parse();
         // Fetch remote secrets before stopping: if the secret manager fails, the service keeps running.
         // saveComposeConfigs() below reuses the fetched secrets.

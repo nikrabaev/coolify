@@ -841,6 +841,9 @@ class All extends Component
                 if ($hideValues) {
                     return "$item->key=(Hidden, only admins can view)";
                 }
+                if ($item->is_managed_by_infisical) {
+                    return "$item->key=(Managed by Infisical, edit it in Infisical)";
+                }
                 if ($item->is_shown_once) {
                     return "$item->key=(Locked Secret, delete and add again to change)";
                 }
@@ -1003,8 +1006,9 @@ class All extends Component
     {
         $method = $isPreview ? 'environment_variables_preview' : 'environment_variables';
 
-        // Get all environment variables that will be deleted
-        $variablesToDelete = $this->resource->$method()->whereNotIn('key', array_keys($variables))->get();
+        // Get all environment variables that will be deleted. Infisical-managed
+        // rows are excluded: only a sync (or removing the sync config) may drop them.
+        $variablesToDelete = $this->resource->$method()->where('is_managed_by_infisical', false)->whereNotIn('key', array_keys($variables))->get();
 
         // Generated Compose variables are managed by Coolify and must survive a bulk
         // replacement even when they are omitted from the pasted environment file.
@@ -1070,6 +1074,10 @@ class All extends Component
             $found = $this->resource->$method()->where('key', $key)->first();
 
             if ($found) {
+                if ($found->is_managed_by_infisical) {
+                    // Owned by the Infisical sync; the bulk editor may not change it.
+                    continue;
+                }
                 if (! $found->is_shown_once && ! $found->is_multiline) {
                     $changed = false;
 

@@ -14,6 +14,7 @@ use App\Models\Environment;
 use App\Models\EnvironmentVariable;
 use App\Models\GithubApp;
 use App\Models\GitlabApp;
+use App\Models\InfisicalIntegration;
 use App\Models\InstanceSettings;
 use App\Models\IntegrationToken;
 use App\Models\PrivateKey;
@@ -53,6 +54,7 @@ use App\Policies\EnvironmentPolicy;
 use App\Policies\EnvironmentVariablePolicy;
 use App\Policies\GithubAppPolicy;
 use App\Policies\GitlabAppPolicy;
+use App\Policies\InfisicalIntegrationPolicy;
 use App\Policies\InstanceSettingsPolicy;
 use App\Policies\IntegrationTokenPolicy;
 use App\Policies\NotificationPolicy;
@@ -139,6 +141,9 @@ class AuthServiceProvider extends ServiceProvider
         IntegrationToken::class => IntegrationTokenPolicy::class,
         CloudInitScript::class => CloudInitScriptPolicy::class,
         Tag::class => TagPolicy::class,
+
+        // Infisical secret-manager integration policy
+        InfisicalIntegration::class => InfisicalIntegrationPolicy::class,
 
     ];
 

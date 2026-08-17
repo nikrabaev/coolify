@@ -42,6 +42,8 @@ class Show extends Component
 
     public bool $isMagicVariable = false;
 
+    public bool $isManagedByInfisical = false;
+
     public bool $isSharedVariable = false;
 
     public string $type;
@@ -277,6 +279,11 @@ class Show extends Component
     {
         $this->isDisabled = false;
         $this->isMagicVariable = false;
+        $this->isManagedByInfisical = (bool) ($this->env->is_managed_by_infisical ?? false);
+
+        if ($this->isManagedByInfisical) {
+            $this->isDisabled = true;
+        }
 
         if (str($this->env->key)->startsWith('SERVICE_FQDN') || str($this->env->key)->startsWith('SERVICE_URL') || str($this->env->key)->startsWith('SERVICE_NAME')) {
             $this->isDisabled = true;
@@ -297,6 +304,12 @@ class Show extends Component
     {
         $this->authorize('update', $this->env);
 
+        if ($this->isManagedByInfisical) {
+            $this->dispatch('error', 'Infisical-managed variables cannot be locked.');
+
+            return;
+        }
+
         $this->env->is_shown_once = true;
         if ($this->isSharedVariable) {
             unset($this->env->is_required);
@@ -316,6 +329,13 @@ class Show extends Component
     {
         try {
             $this->authorize('update', $this->env);
+
+            if ($this->isManagedByInfisical) {
+                $this->dispatch('error', 'This variable is managed by Infisical. Convert it to a manual variable on the Infisical tab to edit it.');
+
+                return;
+            }
+
             $this->loadValues();
 
             if (! $this->isSharedVariable && $this->is_required && str($this->value)->isEmpty()) {
@@ -491,6 +511,12 @@ class Show extends Component
     {
         try {
             $this->authorize('delete', $this->env);
+
+            if ($this->isManagedByInfisical) {
+                $this->dispatch('error', 'This variable is managed by Infisical. Remove the secret in Infisical, or delete the sync configuration, instead.');
+
+                return;
+            }
 
             // Check if the variable is used in Docker Compose
             if ($this->type === 'service' || $this->type === 'application' && $this->env->resourceable?->docker_compose) {
