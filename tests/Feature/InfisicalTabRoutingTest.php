@@ -3,6 +3,7 @@
 use App\Livewire\Project\Application\Configuration as ApplicationConfiguration;
 use App\Livewire\Project\Service\Configuration as ServiceConfiguration;
 use App\Livewire\Security\InfisicalTokens;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -59,4 +60,27 @@ it('exposes the Infisical connections page in the security navigation', function
     expect($layout)
         ->toContain("'route' => 'security.infisical'")
         ->toContain("can('viewAny', App\\Models\\InfisicalIntegration::class)");
+});
+
+it('renders the Infisical brand glyph so it themes with the rest of the UI', function () {
+    $html = Blade::render('<x-reicon name="infisical" class="menu-item-icon" />');
+
+    // currentColor is what makes the glyph follow the text colour in light and
+    // dark mode; a hardcoded fill would render invisible on one of them.
+    expect($html)->toContain('currentColor')
+        ->and($html)->not->toMatch('/#[0-9a-f]{3,6}|fill="black"|fill="white"/i')
+        ->and($html)->toContain('viewBox="0 0 24 24"')
+        ->and($html)->toContain('menu-item-icon');
+});
+
+it('uses the Infisical glyph in every menu that shows an icon', function () {
+    $withIcons = [
+        resource_path('views/components/security/settings-layout.blade.php'),
+        resource_path('views/components/service/configuration-sidebar.blade.php'),
+        resource_path('views/livewire/project/service/configuration.blade.php'),
+    ];
+
+    foreach ($withIcons as $path) {
+        expect(file_get_contents($path))->toContain("'icon' => 'infisical'");
+    }
 });
