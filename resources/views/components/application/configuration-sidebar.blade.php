@@ -149,6 +149,7 @@
             'Advanced' => 'grid',
             'Swarm' => 'destinations',
             'Environment Variables' => 'variables',
+            'Infisical' => 'infisical',
             'Persistent Storage' => 'storages',
             'Backups' => 'database',
             'Terminal' => 'browser-terminal',
