@@ -22,3 +22,7 @@ patches:
     type: branch
     ref: patch/settings-update-card
     reason: start an available update from /settings/updates; the top-bar trigger is desktop-only and unreachable on mobile
+  - id: upgrade-restart-completion
+    type: branch
+    ref: patch/upgrade-restart-completion
+    reason: upgrade modal hung on the restart step; the running version was read from the browser's Livewire snapshot, so it never reached the target and the status file was already deleted by the time the new container answered
