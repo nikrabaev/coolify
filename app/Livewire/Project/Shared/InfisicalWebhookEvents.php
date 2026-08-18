@@ -27,8 +27,22 @@ class InfisicalWebhookEvents extends Component
         InfisicalWebhookEvent::OUTCOME_QUEUED => ['label' => 'Sync queued', 'type' => 'success'],
         InfisicalWebhookEvent::OUTCOME_PAYLOAD_MISMATCH => ['label' => 'Payload mismatch', 'type' => 'warning'],
         InfisicalWebhookEvent::OUTCOME_INVALID_SIGNATURE => ['label' => 'Invalid signature', 'type' => 'error'],
+        InfisicalWebhookEvent::OUTCOME_MALFORMED_SIGNATURE => ['label' => 'Unreadable signature', 'type' => 'error'],
+        InfisicalWebhookEvent::OUTCOME_STALE_TIMESTAMP => ['label' => 'Timestamp too old', 'type' => 'error'],
         InfisicalWebhookEvent::OUTCOME_SECRET_MISSING => ['label' => 'No webhook secret', 'type' => 'error'],
         InfisicalWebhookEvent::OUTCOME_DISABLED => ['label' => 'Sync disabled', 'type' => 'neutral'],
+    ];
+
+    /**
+     * What each unverified outcome means, so a rejected call tells the user what
+     * to go and fix rather than just that something was refused.
+     */
+    public const HINTS = [
+        InfisicalWebhookEvent::OUTCOME_INVALID_SIGNATURE => 'The caller signed with a different secret. Re-copy the webhook secret into Infisical.',
+        InfisicalWebhookEvent::OUTCOME_MALFORMED_SIGNATURE => 'The call did not carry a signature Coolify could read. It probably did not come from Infisical.',
+        InfisicalWebhookEvent::OUTCOME_STALE_TIMESTAMP => 'The signature was older than 5 minutes. Check the clock on this server and on Infisical.',
+        InfisicalWebhookEvent::OUTCOME_SECRET_MISSING => 'No webhook secret is saved on this configuration, so calls cannot be verified.',
+        InfisicalWebhookEvent::OUTCOME_DISABLED => 'Syncing is turned off for this resource, so the call was ignored.',
     ];
 
     #[Locked]
@@ -53,7 +67,12 @@ class InfisicalWebhookEvents extends Component
             return collect();
         }
 
-        return $config->webhookEvents()->orderByDesc('id')->get();
+        // By last activity, not by insert order: a coalesced counter row keeps its
+        // original id but is bumped on every new call it stands for.
+        return $config->webhookEvents()
+            ->orderByDesc('updated_at')
+            ->orderByDesc('id')
+            ->get();
     }
 
     /**
@@ -65,6 +84,11 @@ class InfisicalWebhookEvents extends Component
             'label' => ucfirst(str_replace('_', ' ', $outcome)),
             'type' => 'neutral',
         ];
+    }
+
+    public function hintFor(string $outcome): ?string
+    {
+        return self::HINTS[$outcome] ?? null;
     }
 
     public function render()
