@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 
 class InfisicalSyncConfig extends BaseModel
@@ -75,6 +76,11 @@ class InfisicalSyncConfig extends BaseModel
     public function resourceable(): MorphTo
     {
         return $this->morphTo();
+    }
+
+    public function webhookEvents(): HasMany
+    {
+        return $this->hasMany(InfisicalWebhookEvent::class, 'infisical_sync_config_id');
     }
 
     public static function forResource(Model $resource): ?self
