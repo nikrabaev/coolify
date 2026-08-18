@@ -142,3 +142,80 @@ it('clears stale upgrade availability when current version is newer than cached 
 
     expect((bool) InstanceSettings::findOrFail(0)->new_version_available)->toBeFalse();
 });
+
+it('renders an update card with an action when a new version is available', function () {
+    config(['constants.coolify.version' => '4.0.0-beta.998']);
+    InstanceSettings::forceCreate([
+        'id' => 0,
+        'new_version_available' => true,
+    ]);
+
+    Cache::shouldReceive('remember')
+        ->once()
+        ->with('coolify:versions:all', 3600, Mockery::type(Closure::class))
+        ->andReturn([
+            'coolify' => [
+                'v4' => [
+                    'version' => '4.0.0-beta.999',
+                ],
+            ],
+        ]);
+
+    Livewire::test(Upgrade::class, ['variant' => 'card'])
+        ->assertSet('variant', 'card')
+        ->assertSet('isUpgradeAvailable', true)
+        ->assertSee('A new version is available')
+        ->assertSee('Update now')
+        ->assertSee('4.0.0-beta.998')
+        ->assertSee('4.0.0-beta.999')
+        ->assertDontSee('Update available');
+});
+
+it('renders an up to date card without an action when no new version is available', function () {
+    config(['constants.coolify.version' => '4.0.0-beta.999']);
+    InstanceSettings::forceCreate([
+        'id' => 0,
+        'new_version_available' => false,
+    ]);
+
+    Cache::shouldReceive('remember')
+        ->once()
+        ->with('coolify:versions:all', 3600, Mockery::type(Closure::class))
+        ->andReturn([
+            'coolify' => [
+                'v4' => [
+                    'version' => '4.0.0-beta.999',
+                ],
+            ],
+        ]);
+
+    Livewire::test(Upgrade::class, ['variant' => 'card'])
+        ->assertSet('isUpgradeAvailable', false)
+        ->assertSee('Coolify is up to date')
+        ->assertSee('4.0.0-beta.999')
+        ->assertDontSee('Update now');
+});
+
+it('keeps the card action out of the desktop only sidebar variant', function () {
+    config(['constants.coolify.version' => '4.0.0-beta.998']);
+    InstanceSettings::forceCreate([
+        'id' => 0,
+        'new_version_available' => true,
+    ]);
+
+    Cache::shouldReceive('remember')
+        ->once()
+        ->with('coolify:versions:all', 3600, Mockery::type(Closure::class))
+        ->andReturn([
+            'coolify' => [
+                'v4' => [
+                    'version' => '4.0.0-beta.999',
+                ],
+            ],
+        ]);
+
+    Livewire::test(Upgrade::class, ['variant' => 'unknown-variant'])
+        ->assertSet('variant', 'sidebar')
+        ->assertSee('Update available')
+        ->assertDontSee('A new version is available');
+});
