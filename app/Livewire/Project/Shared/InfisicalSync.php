@@ -13,7 +13,6 @@ use App\Support\ValidationPatterns;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Computed;
 use Livewire\Attributes\Locked;
@@ -200,14 +199,6 @@ class InfisicalSync extends Component
             ])
             ->values()
             ->all();
-    }
-
-    public function generateWebhookSecret(): void
-    {
-        $this->authorize('manageEnvironment', $this->resource);
-
-        $this->webhook_secret = Str::random(40);
-        $this->dispatch('success', 'A new webhook secret was generated. Save the configuration to store it.');
     }
 
     public function submit(): void
