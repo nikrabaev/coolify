@@ -10,6 +10,8 @@ use Livewire\Component;
 
 class Upgrade extends Component
 {
+    public string $variant = 'sidebar';
+
     public bool $updateInProgress = false;
 
     public bool $isUpgradeAvailable = false;
@@ -22,8 +24,9 @@ class Upgrade extends Component
 
     protected $listeners = ['updateAvailable' => 'checkUpdate'];
 
-    public function mount()
+    public function mount(string $variant = 'sidebar')
     {
+        $this->variant = in_array($variant, ['sidebar', 'card'], true) ? $variant : 'sidebar';
         $this->refreshUpgradeState();
     }
 
