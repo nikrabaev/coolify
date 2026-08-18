@@ -74,13 +74,30 @@ it('renders the Infisical brand glyph so it themes with the rest of the UI', fun
 });
 
 it('uses the Infisical glyph in every menu that shows an icon', function () {
-    $withIcons = [
+    // Two mechanisms exist: an inline 'icon' key per item, and a label-keyed
+    // $menuIcons map. A menu using the map silently falls back to 'settings'
+    // when the label is missing, so both are asserted here.
+    $inlineIcon = [
         resource_path('views/components/security/settings-layout.blade.php'),
         resource_path('views/components/service/configuration-sidebar.blade.php'),
         resource_path('views/livewire/project/service/configuration.blade.php'),
     ];
 
-    foreach ($withIcons as $path) {
+    foreach ($inlineIcon as $path) {
         expect(file_get_contents($path))->toContain("'icon' => 'infisical'");
+    }
+
+    $labelKeyed = [resource_path('views/components/application/configuration-sidebar.blade.php')];
+
+    foreach ($labelKeyed as $path) {
+        expect(file_get_contents($path))->toContain("'Infisical' => 'infisical'");
+    }
+
+    // Nothing that lists the tab may be left without a mapping.
+    foreach (array_merge($inlineIcon, $labelKeyed) as $path) {
+        $source = file_get_contents($path);
+        if (str_contains($source, "'Infisical'")) {
+            expect($source)->toContain('infisical');
+        }
     }
 });
