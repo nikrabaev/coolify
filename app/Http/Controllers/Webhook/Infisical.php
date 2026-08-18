@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Webhook;
 use App\Http\Controllers\Controller;
 use App\Jobs\InfisicalSyncJob;
 use App\Models\InfisicalSyncConfig;
+use App\Models\InfisicalWebhookEvent;
 use Illuminate\Http\Request;
+use Throwable;
 
 class Infisical extends Controller
 {
@@ -49,31 +51,47 @@ class Infisical extends Controller
         }
 
         $config = InfisicalSyncConfig::where('uuid', $uuid)->first();
-        $secret = $config?->enabled ? $config->webhook_secret : null;
 
-        if (blank($secret)) {
-            if ($config?->enabled) {
-                auditLogWebhookFailure('infisical', 'webhook_secret_missing', [
-                    'infisical_sync_config_uuid' => $config->uuid,
-                ]);
-            }
+        if (! $config) {
+            return $this->ignored();
+        }
+
+        if (! $config->enabled) {
+            $this->recordEvent($config, InfisicalWebhookEvent::OUTCOME_DISABLED);
+
+            return $this->ignored();
+        }
+
+        if (blank($config->webhook_secret)) {
+            auditLogWebhookFailure('infisical', 'webhook_secret_missing', [
+                'infisical_sync_config_uuid' => $config->uuid,
+            ]);
+            $this->recordEvent($config, InfisicalWebhookEvent::OUTCOME_SECRET_MISSING);
 
             return $this->ignored();
         }
 
         // Sign the raw bytes: the timestamp is already inside the body Infisical
         // hashed, and re-encoding the decoded JSON would change them.
-        $expectedHmac = hash_hmac('sha256', $request->getContent(), $secret);
+        $expectedHmac = hash_hmac('sha256', $request->getContent(), $config->webhook_secret);
 
         if (! hash_equals($expectedHmac, $providedHmac)) {
             auditLogWebhookFailure('infisical', 'invalid_signature', [
                 'infisical_sync_config_uuid' => $config->uuid,
             ]);
+            $this->recordEvent($config, InfisicalWebhookEvent::OUTCOME_INVALID_SIGNATURE);
 
             return $this->ignored();
         }
 
+        // Only trusted past this point: the signature proved the payload came
+        // from whoever holds the webhook secret.
+        $event = $request->input('event');
+        $event = is_string($event) ? $event : null;
+
         if (! $this->payloadMatchesConfig($request, $config)) {
+            $this->recordEvent($config, InfisicalWebhookEvent::OUTCOME_PAYLOAD_MISMATCH, $event);
+
             return response()->json(['status' => 'ignored', 'message' => 'Payload does not match this configuration.']);
         }
 
@@ -81,10 +99,27 @@ class Infisical extends Controller
 
         auditLog('webhook.infisical.sync_queued', [
             'infisical_sync_config_uuid' => $config->uuid,
-            'event' => $request->input('event'),
+            'event' => $event,
         ]);
+        $this->recordEvent($config, InfisicalWebhookEvent::OUTCOME_QUEUED, $event);
 
         return response()->json(['status' => 'queued', 'message' => 'Secret sync queued.']);
+    }
+
+    /**
+     * Keep a per-configuration history of received calls so the user can see
+     * whether Infisical reaches Coolify. Never allowed to break the webhook.
+     */
+    private function recordEvent(InfisicalSyncConfig $config, string $outcome, ?string $event = null): void
+    {
+        try {
+            InfisicalWebhookEvent::record($config, $outcome, $event);
+        } catch (Throwable $e) {
+            auditLog('webhook.infisical.history_write_failed', [
+                'infisical_sync_config_uuid' => $config->uuid,
+                'error' => $e->getMessage(),
+            ], 'warning');
+        }
     }
 
     /**
