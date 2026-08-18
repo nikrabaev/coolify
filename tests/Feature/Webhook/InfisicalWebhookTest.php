@@ -5,6 +5,7 @@ use App\Models\Application;
 use App\Models\Environment;
 use App\Models\InfisicalIntegration;
 use App\Models\InfisicalSyncConfig;
+use App\Models\InfisicalWebhookEvent;
 use App\Models\InstanceSettings;
 use App\Models\Project;
 use App\Models\Team;
@@ -193,4 +194,94 @@ it('accepts a payload that omits the project block', function () {
         ->assertJsonPath('status', 'queued');
 
     Queue::assertPushed(InfisicalSyncJob::class);
+});
+
+it('records a history entry for a queued sync, with the event name', function () {
+    $body = infisicalBody();
+
+    postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, $this->webhookSecret));
+
+    $entry = $this->config->webhookEvents()->sole();
+    expect($entry->outcome)->toBe(InfisicalWebhookEvent::OUTCOME_QUEUED)
+        ->and($entry->event)->toBe('secrets.modified');
+});
+
+it('records unverified calls without storing anything from the payload', function () {
+    $body = infisicalBody(['event' => 'attacker-controlled']);
+
+    postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, 'wrong-secret'));
+
+    $entry = $this->config->webhookEvents()->sole();
+    expect($entry->outcome)->toBe(InfisicalWebhookEvent::OUTCOME_INVALID_SIGNATURE)
+        ->and($entry->event)->toBeNull();
+});
+
+it('records a payload mismatch with the verified event name', function () {
+    $body = infisicalBody(['project' => ['environment' => 'staging']]);
+
+    postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, $this->webhookSecret));
+
+    $entry = $this->config->webhookEvents()->sole();
+    expect($entry->outcome)->toBe(InfisicalWebhookEvent::OUTCOME_PAYLOAD_MISMATCH)
+        ->and($entry->event)->toBe('secrets.modified');
+});
+
+it('records calls that hit a disabled configuration or a missing secret', function () {
+    $body = infisicalBody();
+
+    $this->config->update(['enabled' => false]);
+    postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, $this->webhookSecret));
+
+    $this->config->update(['enabled' => true, 'webhook_secret' => null]);
+    postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, $this->webhookSecret));
+
+    expect($this->config->webhookEvents()->orderBy('id')->pluck('outcome')->all())->toBe([
+        InfisicalWebhookEvent::OUTCOME_DISABLED,
+        InfisicalWebhookEvent::OUTCOME_SECRET_MISSING,
+    ]);
+});
+
+it('records nothing for unknown uuids or requests rejected before the config lookup', function () {
+    $body = infisicalBody();
+
+    postInfisicalWebhook('does-not-exist', $body, infisicalSignature($body, $this->webhookSecret));
+    postInfisicalWebhook($this->config->uuid, $body, null);
+    postInfisicalWebhook($this->config->uuid, $body, 'not-a-signature');
+
+    $staleMs = (int) ((microtime(true) - 3600) * 1000);
+    postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, $this->webhookSecret, $staleMs));
+
+    expect(InfisicalWebhookEvent::count())->toBe(0);
+});
+
+it('keeps only the newest entries per configuration', function () {
+    InfisicalWebhookEvent::factory()
+        ->count(InfisicalWebhookEvent::KEEP_PER_CONFIG + 5)
+        ->create(['infisical_sync_config_id' => $this->config->id]);
+
+    $otherConfig = InfisicalSyncConfig::factory()->create([
+        'infisical_integration_id' => $this->integration->id,
+        'resourceable_type' => $this->application->getMorphClass(),
+        'resourceable_id' => Application::factory()->create(['environment_id' => $this->environment->id])->id,
+    ]);
+    $kept = InfisicalWebhookEvent::factory()->create(['infisical_sync_config_id' => $otherConfig->id]);
+
+    $body = infisicalBody();
+    postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, $this->webhookSecret));
+
+    $ids = $this->config->webhookEvents()->orderByDesc('id')->pluck('id');
+    expect($ids)->toHaveCount(InfisicalWebhookEvent::KEEP_PER_CONFIG)
+        // The newest row is the one the call above just wrote ...
+        ->and($this->config->webhookEvents()->orderByDesc('id')->first()->outcome)
+        ->toBe(InfisicalWebhookEvent::OUTCOME_QUEUED)
+        // ... and pruning one configuration never touches another one's history.
+        ->and($kept->fresh())->not->toBeNull();
+});
+
+it('deletes the history together with its configuration', function () {
+    InfisicalWebhookEvent::factory()->count(3)->create(['infisical_sync_config_id' => $this->config->id]);
+
+    $this->config->delete();
+
+    expect(InfisicalWebhookEvent::count())->toBe(0);
 });
