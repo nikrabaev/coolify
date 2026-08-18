@@ -306,3 +306,81 @@ it('forbids non-admin members from mutating the configuration', function (string
     'convert to manual' => ['convertToManual', ['API_KEY']],
     'delete configuration' => ['deleteConfiguration', []],
 ]);
+
+it('saves subfolder prefixes as a normalized map', function () {
+    $application = tabMakeApplication();
+
+    Livewire::test(InfisicalSync::class, ['resource' => $application])
+        ->set('infisical_integration_id', $this->integration->id)
+        ->set('infisical_project_id', 'project-abc')
+        ->set('environment_slug', 'prod')
+        ->set('recursive', true)
+        ->set('path_prefix_map', "# the api service\nservices/api/ = API_\n\n/services/worker = WORKER_")
+        ->call('submit')
+        ->assertHasNoErrors()
+        ->assertDispatched('success');
+
+    expect(InfisicalSyncConfig::forResource($application)->path_prefix_map)->toBe([
+        '/services/api' => 'API_',
+        '/services/worker' => 'WORKER_',
+    ]);
+});
+
+it('stores no map when the prefix box is left empty', function () {
+    $application = tabMakeApplication();
+
+    Livewire::test(InfisicalSync::class, ['resource' => $application])
+        ->set('infisical_integration_id', $this->integration->id)
+        ->set('infisical_project_id', 'project-abc')
+        ->set('environment_slug', 'prod')
+        ->call('submit')
+        ->assertHasNoErrors();
+
+    expect(InfisicalSyncConfig::forResource($application)->path_prefix_map)->toBeNull();
+});
+
+it('rejects a prefix that cannot start an environment variable name', function () {
+    $application = tabMakeApplication();
+
+    Livewire::test(InfisicalSync::class, ['resource' => $application])
+        ->set('infisical_integration_id', $this->integration->id)
+        ->set('infisical_project_id', 'project-abc')
+        ->set('environment_slug', 'prod')
+        ->set('path_prefix_map', '/services/api = 1API-')
+        ->call('submit')
+        ->assertHasErrors('path_prefix_map');
+
+    expect(InfisicalSyncConfig::forResource($application))->toBeNull();
+});
+
+it('rejects a line that is not a path and a prefix', function () {
+    $application = tabMakeApplication();
+
+    Livewire::test(InfisicalSync::class, ['resource' => $application])
+        ->set('infisical_integration_id', $this->integration->id)
+        ->set('infisical_project_id', 'project-abc')
+        ->set('environment_slug', 'prod')
+        ->set('path_prefix_map', '/services/api API_')
+        ->call('submit')
+        ->assertHasErrors('path_prefix_map');
+});
+
+it('rejects the same folder mapped twice', function () {
+    $application = tabMakeApplication();
+
+    Livewire::test(InfisicalSync::class, ['resource' => $application])
+        ->set('infisical_integration_id', $this->integration->id)
+        ->set('infisical_project_id', 'project-abc')
+        ->set('environment_slug', 'prod')
+        ->set('path_prefix_map', "/services/api = API_\n/services/api/ = OTHER_")
+        ->call('submit')
+        ->assertHasErrors('path_prefix_map');
+});
+
+it('pre-fills the subfolder prefixes from the stored configuration', function () {
+    $application = tabMakeApplication();
+    tabMakeConfig($application, ['path_prefix_map' => ['/services/api' => 'API_', '/services/plain' => '']]);
+
+    Livewire::test(InfisicalSync::class, ['resource' => $application])
+        ->assertSet('path_prefix_map', "/services/api = API_\n/services/plain = ");
+});

@@ -9,6 +9,7 @@ use App\Models\Application;
 use App\Models\EnvironmentVariable;
 use App\Models\InfisicalIntegration;
 use App\Models\InfisicalSyncConfig;
+use App\Support\ValidationPatterns;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
@@ -37,6 +38,9 @@ class InfisicalSync extends Component
         SyncInfisicalSecrets::SKIP_COMPOSE_REFERENCE => 'gone from Infisical, but kept as a manual variable because your compose file still uses it',
     ];
 
+    /** Bounds both the stored column and the per-secret lookup during a sync. */
+    private const MAX_PATH_PREFIXES = 100;
+
     #[Locked]
     public $resource;
 
@@ -49,6 +53,12 @@ class InfisicalSync extends Component
     public string $secret_path = '/';
 
     public bool $recursive = false;
+
+    /**
+     * Free text, one "/folder = PREFIX_" mapping per line. Parsed into the map
+     * stored on the configuration when the form is submitted.
+     */
+    public string $path_prefix_map = '';
 
     public bool $enabled = true;
 
@@ -76,6 +86,7 @@ class InfisicalSync extends Component
             'environment_slug' => ['required', 'string', 'max:255'],
             'secret_path' => ['nullable', 'string', 'max:255'],
             'recursive' => ['boolean'],
+            'path_prefix_map' => ['nullable', 'string', 'max:8000'],
             'enabled' => ['boolean'],
             'sync_before_deploy' => ['boolean'],
             'abort_deployment_on_failure' => ['boolean'],
@@ -90,6 +101,7 @@ class InfisicalSync extends Component
         'infisical_project_id' => 'project id',
         'environment_slug' => 'environment slug',
         'secret_path' => 'secret path',
+        'path_prefix_map' => 'subfolder prefixes',
         'polling_frequency' => 'polling frequency',
         'webhook_secret' => 'webhook secret',
     ];
@@ -110,6 +122,7 @@ class InfisicalSync extends Component
         $this->environment_slug = (string) $config->environment_slug;
         $this->secret_path = (string) ($config->secret_path ?: '/');
         $this->recursive = (bool) $config->recursive;
+        $this->path_prefix_map = $this->formatPathPrefixMap($config->pathPrefixMap());
         $this->enabled = (bool) $config->enabled;
         $this->sync_before_deploy = (bool) $config->sync_before_deploy;
         $this->abort_deployment_on_failure = (bool) $config->abort_deployment_on_failure;
@@ -220,11 +233,10 @@ class InfisicalSync extends Component
                 return;
             }
 
-            $secretPath = trim((string) $this->secret_path);
-            $secretPath = $secretPath === '' ? '/' : $secretPath;
-            if (! str_starts_with($secretPath, '/')) {
-                $secretPath = '/'.$secretPath;
-            }
+            // Normalized the same way as the prefix map paths, so the two always
+            // line up with each other and with the paths the API reports.
+            $secretPath = InfisicalSyncConfig::normalizeSecretPath($this->secret_path);
+            $prefixMap = $this->parsePathPrefixMap();
 
             $attributes = [
                 'infisical_integration_id' => $integration->id,
@@ -232,6 +244,7 @@ class InfisicalSync extends Component
                 'environment_slug' => trim($this->environment_slug),
                 'secret_path' => $secretPath,
                 'recursive' => $this->recursive,
+                'path_prefix_map' => $prefixMap ?: null,
                 'enabled' => $this->enabled,
                 'sync_before_deploy' => $this->sync_before_deploy,
                 'abort_deployment_on_failure' => $this->abort_deployment_on_failure,
@@ -428,6 +441,7 @@ class InfisicalSync extends Component
             'environment_slug' => $this->environment_slug,
             'secret_path' => $this->secret_path,
             'recursive' => $this->recursive,
+            'path_prefix_map' => $this->path_prefix_map,
             'enabled' => $this->enabled,
             'sync_before_deploy' => $this->sync_before_deploy,
             'abort_deployment_on_failure' => $this->abort_deployment_on_failure,
@@ -435,6 +449,70 @@ class InfisicalSync extends Component
             'polling_frequency' => $this->polling_frequency,
             'webhook_secret' => $this->webhook_secret,
         ], $this->rules(), [], $this->validationAttributes)->validate();
+    }
+
+    /**
+     * Parse the "/folder = PREFIX_" lines into the map stored on the config.
+     * Blank lines and # comments are ignored.
+     *
+     * @return array<string, string>
+     *
+     * @throws ValidationException
+     */
+    private function parsePathPrefixMap(): array
+    {
+        $map = [];
+
+        foreach (preg_split('/\R/', $this->path_prefix_map) ?: [] as $index => $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#')) {
+                continue;
+            }
+
+            $number = $index + 1;
+
+            if (! str_contains($line, '=')) {
+                $this->rejectPathPrefixMap("Line {$number} must look like \"/folder = PREFIX_\".");
+            }
+
+            [$path, $prefix] = explode('=', $line, 2);
+            $path = InfisicalSyncConfig::normalizeSecretPath($path);
+            $prefix = trim($prefix);
+
+            // The prefix is glued onto a key that already has to match this
+            // pattern, so requiring it here makes the joined key valid too.
+            if ($prefix !== '' && preg_match(ValidationPatterns::ENVIRONMENT_VARIABLE_KEY_PATTERN, $prefix) !== 1) {
+                $this->rejectPathPrefixMap("Line {$number}: \"{$prefix}\" cannot start an environment variable name. Start with a letter or underscore and use only letters, numbers, underscores and dots.");
+            }
+
+            if (array_key_exists($path, $map)) {
+                $this->rejectPathPrefixMap("Line {$number}: {$path} is mapped more than once.");
+            }
+
+            $map[$path] = $prefix;
+        }
+
+        if (count($map) > self::MAX_PATH_PREFIXES) {
+            $this->rejectPathPrefixMap('Use at most '.self::MAX_PATH_PREFIXES.' path prefixes.');
+        }
+
+        return $map;
+    }
+
+    /**
+     * @throws ValidationException
+     */
+    private function rejectPathPrefixMap(string $message): never
+    {
+        throw ValidationException::withMessages(['path_prefix_map' => $message]);
+    }
+
+    /**
+     * @param  array<string, string>  $map
+     */
+    private function formatPathPrefixMap(array $map): string
+    {
+        return collect($map)->map(fn ($prefix, $path) => "{$path} = {$prefix}")->join("\n");
     }
 
     private function refreshState(): void

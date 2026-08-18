@@ -25,6 +25,7 @@ class InfisicalSyncConfig extends BaseModel
         'environment_slug',
         'secret_path',
         'recursive',
+        'path_prefix_map',
         'enabled',
         'sync_before_deploy',
         'abort_deployment_on_failure',
@@ -43,6 +44,7 @@ class InfisicalSyncConfig extends BaseModel
 
     protected $casts = [
         'recursive' => 'boolean',
+        'path_prefix_map' => 'array',
         'enabled' => 'boolean',
         'sync_before_deploy' => 'boolean',
         'abort_deployment_on_failure' => 'boolean',
@@ -108,6 +110,76 @@ class InfisicalSyncConfig extends BaseModel
     public function deleteManagedVariables(): int
     {
         return $this->managedVariables()->delete();
+    }
+
+    /**
+     * Normalize a folder path to the shape the Infisical API reports it in: one
+     * leading slash, no trailing slash, no repeated slashes. The root stays "/".
+     */
+    public static function normalizeSecretPath(?string $path): string
+    {
+        $collapsed = preg_replace('#/+#', '/', trim((string) $path)) ?? '';
+        $trimmed = trim($collapsed, '/');
+
+        return $trimmed === '' ? '/' : '/'.$trimmed;
+    }
+
+    /**
+     * The configured path => prefix map with every path normalized, so a match
+     * never depends on how the user happened to type the folder.
+     *
+     * @return array<string, string>
+     */
+    public function pathPrefixMap(): array
+    {
+        $map = [];
+
+        foreach ($this->path_prefix_map ?? [] as $path => $prefix) {
+            if (! is_string($prefix)) {
+                continue;
+            }
+
+            $map[self::normalizeSecretPath((string) $path)] = $prefix;
+        }
+
+        return $map;
+    }
+
+    /**
+     * The prefix that applies to a folder: the longest mapped path that is the
+     * folder itself or one of its parents, so mapping a subtree once covers
+     * everything below it.
+     *
+     * An empty prefix is a deliberate "no prefix here" — that is how a subfolder
+     * opts out of a prefix its parent would otherwise give it.
+     *
+     * @param  array<string, string>  $map
+     */
+    public static function prefixForPath(array $map, ?string $path): string
+    {
+        $path = self::normalizeSecretPath($path);
+        $prefix = '';
+        $matchedDepth = -1;
+
+        foreach ($map as $rawMapped => $candidate) {
+            // Normalized here too: a map that skipped pathPrefixMap() would
+            // otherwise miss every folder the user typed with a trailing slash.
+            $mapped = self::normalizeSecretPath((string) $rawMapped);
+
+            // "/" is every folder's parent; anything else has to match a whole
+            // segment so /services never claims the secrets of /services-old.
+            if ($mapped !== '/' && $mapped !== $path && ! str_starts_with($path, $mapped.'/')) {
+                continue;
+            }
+
+            $depth = strlen($mapped);
+            if ($depth > $matchedDepth) {
+                $matchedDepth = $depth;
+                $prefix = $candidate;
+            }
+        }
+
+        return $prefix;
     }
 
     public function pollingEnabled(): bool
