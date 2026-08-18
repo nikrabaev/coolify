@@ -18,3 +18,7 @@ patches:
     type: branch
     ref: patch/env-var-delete-guard
     reason: compose env-var delete guard matched keys instead of values, blocking deletion of every left-hand name in a compose file
+  - id: settings-update-card
+    type: branch
+    ref: patch/settings-update-card
+    reason: start an available update from /settings/updates; the top-bar trigger is desktop-only and unreachable on mobile
