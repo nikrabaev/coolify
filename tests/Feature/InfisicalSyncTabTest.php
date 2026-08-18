@@ -155,14 +155,17 @@ it('requires the mandatory fields', function () {
     expect(InfisicalSyncConfig::forResource($application))->toBeNull();
 });
 
-it('generates a webhook secret', function () {
+it('generates the webhook secret client-side so the unsaved bar appears', function () {
     $application = tabMakeApplication();
 
-    $component = Livewire::test(InfisicalSync::class, ['resource' => $application])
-        ->call('generateWebhookSecret')
-        ->assertDispatched('success');
-
-    expect($component->get('webhook_secret'))->toBeString()->toHaveLength(40);
+    // The secret is generated in the browser with a deferred $wire.set: a server
+    // action would fold the value into the Livewire snapshot and the unsaved
+    // changes bar (wire:dirty) would never show up.
+    Livewire::test(InfisicalSync::class, ['resource' => $application])
+        ->assertSee('crypto.getRandomValues', false)
+        ->assertSee("\$wire.set('webhook_secret'", false)
+        ->assertDontSee('generateWebhookSecret')
+        ->assertSee('Save changes');
 });
 
 it('creates managed variables when syncing now', function () {
@@ -302,7 +305,6 @@ it('forbids non-admin members from mutating the configuration', function (string
     'submit' => ['submit', []],
     'sync now' => ['syncNow', []],
     'sync and redeploy' => ['syncAndRedeploy', []],
-    'generate webhook secret' => ['generateWebhookSecret', []],
     'convert to manual' => ['convertToManual', ['API_KEY']],
     'delete configuration' => ['deleteConfiguration', []],
 ]);
