@@ -6,6 +6,7 @@ use App\Models\Server;
 use App\Models\Team;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Once;
 use Livewire\Livewire;
 
@@ -59,4 +60,35 @@ test('instance admin cannot save an invalid docker registry url', function () {
         ->assertHasErrors(['docker_registry_url' => 'in']);
 
     expect($settings->fresh()->docker_registry_url)->toBe('docker.io');
+});
+
+test('settings updates page exposes an update action when a new version is available', function () {
+    config()->set('constants.coolify.self_hosted', true);
+    config()->set('constants.coolify.version', '4.0.0-beta.998');
+
+    $rootTeam = Team::find(0) ?? Team::factory()->create(['id' => 0]);
+    Server::factory()->create(['id' => 0, 'team_id' => $rootTeam->id]);
+    InstanceSettings::forceCreate(['id' => 0, 'new_version_available' => true]);
+    Once::flush();
+
+    Cache::shouldReceive('remember')
+        ->with('coolify:versions:all', 3600, Mockery::type(Closure::class))
+        ->andReturn([
+            'coolify' => [
+                'v4' => [
+                    'version' => '4.0.0-beta.999',
+                ],
+            ],
+        ]);
+
+    $user = User::factory()->create();
+    $rootTeam->members()->attach($user->id, ['role' => 'admin']);
+
+    $this->actingAs($user);
+    session(['currentTeam' => ['id' => $rootTeam->id]]);
+
+    Livewire::test(Updates::class)
+        ->assertOk()
+        ->assertSee('A new version is available')
+        ->assertSee('Update now');
 });

@@ -8,6 +8,10 @@
             {{-- Exclude is_auto_update_enabled (instantSave) so the bar does not flash. --}}
             <x-unsaved-bar action="submit" targets="update_check_frequency,auto_update_frequency" />
 
+            @if (!isCloud())
+                <livewire:upgrade variant="card" />
+            @endif
+
             <x-application.settings-section title="Update checks">
                 <x-slot:actions>
                     <x-forms.button type="button" wire:click="checkManually">
