@@ -73,6 +73,8 @@ it('labels every outcome the webhook endpoint records', function () {
         InfisicalWebhookEvent::OUTCOME_QUEUED,
         InfisicalWebhookEvent::OUTCOME_PAYLOAD_MISMATCH,
         InfisicalWebhookEvent::OUTCOME_INVALID_SIGNATURE,
+        InfisicalWebhookEvent::OUTCOME_MALFORMED_SIGNATURE,
+        InfisicalWebhookEvent::OUTCOME_STALE_TIMESTAMP,
         InfisicalWebhookEvent::OUTCOME_SECRET_MISSING,
         InfisicalWebhookEvent::OUTCOME_DISABLED,
     ])
@@ -81,6 +83,51 @@ it('labels every outcome the webhook endpoint records', function () {
             'label' => 'Something new',
             'type' => 'neutral',
         ]);
+});
+
+it('explains every unverified outcome so the user knows what to fix', function () {
+    $component = new InfisicalWebhookEvents;
+
+    foreach (InfisicalWebhookEvent::UNVERIFIED_OUTCOMES as $outcome) {
+        expect($component->hintFor($outcome))->toBeString()->not->toBeEmpty();
+    }
+
+    // Verified deliveries speak for themselves and carry no hint.
+    expect($component->hintFor(InfisicalWebhookEvent::OUTCOME_QUEUED))->toBeNull();
+});
+
+it('shows a coalesced rejection as a count with its last-seen time', function () {
+    $config = historyMakeConfig();
+
+    foreach (range(1, 7) as $ignored) {
+        InfisicalWebhookEvent::record($config, InfisicalWebhookEvent::OUTCOME_STALE_TIMESTAMP);
+    }
+
+    Livewire::test(InfisicalWebhookEvents::class, ['resource' => $this->application])
+        ->assertSee('Timestamp too old')
+        ->assertSee('&times;7', false)
+        ->assertSee('Check the clock on this server');
+});
+
+it('orders by last activity so a bumped counter surfaces above older deliveries', function () {
+    $config = historyMakeConfig();
+
+    InfisicalWebhookEvent::record($config, InfisicalWebhookEvent::OUTCOME_QUEUED, 'secrets.modified');
+    $delivery = $config->webhookEvents()->sole();
+    // The counter row was created before the delivery but bumped after it.
+    $counter = InfisicalWebhookEvent::create([
+        'infisical_sync_config_id' => $config->id,
+        'outcome' => InfisicalWebhookEvent::OUTCOME_INVALID_SIGNATURE,
+        'occurrences' => 1,
+    ]);
+    $counter->forceFill(['created_at' => now()->subHour()])->save();
+    $delivery->forceFill(['created_at' => now()->subMinutes(30), 'updated_at' => now()->subMinutes(30)])->save();
+    InfisicalWebhookEvent::record($config, InfisicalWebhookEvent::OUTCOME_INVALID_SIGNATURE);
+
+    $component = Livewire::test(InfisicalWebhookEvents::class, ['resource' => $this->application]);
+
+    expect($component->instance()->events->first()->outcome)
+        ->toBe(InfisicalWebhookEvent::OUTCOME_INVALID_SIGNATURE);
 });
 
 it('forbids users outside the resource team', function () {
