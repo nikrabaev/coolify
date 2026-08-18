@@ -241,20 +241,68 @@ it('records calls that hit a disabled configuration or a missing secret', functi
     ]);
 });
 
-it('records nothing for unknown uuids or requests rejected before the config lookup', function () {
+it('records nothing at all for an unknown uuid', function () {
     $body = infisicalBody();
 
     postInfisicalWebhook('does-not-exist', $body, infisicalSignature($body, $this->webhookSecret));
-    postInfisicalWebhook($this->config->uuid, $body, null);
-    postInfisicalWebhook($this->config->uuid, $body, 'not-a-signature');
-
-    $staleMs = (int) ((microtime(true) - 3600) * 1000);
-    postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, $this->webhookSecret, $staleMs));
+    postInfisicalWebhook('does-not-exist', $body, null);
+    postInfisicalWebhook('does-not-exist', $body, 'not-a-signature');
 
     expect(InfisicalWebhookEvent::count())->toBe(0);
 });
 
-it('keeps only the newest entries per configuration', function () {
+it('records calls refused before the signature could be verified', function () {
+    $body = infisicalBody();
+
+    // Clock skew: the call really came from Infisical, and the user needs to see
+    // that it arrived rather than conclude Infisical never called.
+    $staleMs = (int) ((microtime(true) - 3600) * 1000);
+    postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, $this->webhookSecret, $staleMs))
+        ->assertStatus(401);
+
+    postInfisicalWebhook($this->config->uuid, $body, null)->assertStatus(401);
+    postInfisicalWebhook($this->config->uuid, $body, 'not-a-signature')->assertStatus(401);
+
+    $outcomes = $this->config->webhookEvents()->pluck('occurrences', 'outcome')->all();
+    expect($outcomes)->toBe([
+        InfisicalWebhookEvent::OUTCOME_STALE_TIMESTAMP => 1,
+        // The missing header and the unparseable header fold into one counter.
+        InfisicalWebhookEvent::OUTCOME_MALFORMED_SIGNATURE => 2,
+    ]);
+});
+
+it('folds repeated unverified calls into one counter row instead of many rows', function () {
+    $body = infisicalBody();
+
+    foreach (range(1, 12) as $ignored) {
+        postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, 'wrong-secret'));
+    }
+
+    $row = $this->config->webhookEvents()->sole();
+    expect($row->outcome)->toBe(InfisicalWebhookEvent::OUTCOME_INVALID_SIGNATURE)
+        ->and($row->occurrences)->toBe(12)
+        ->and($row->isCounter())->toBeTrue()
+        ->and($row->event)->toBeNull();
+});
+
+it('never lets unverified calls evict verified deliveries', function () {
+    $body = infisicalBody();
+    $signature = infisicalSignature($body, $this->webhookSecret);
+
+    // A real delivery lands first, then someone floods the endpoint with calls
+    // they cannot sign. The genuine row must survive.
+    postInfisicalWebhook($this->config->uuid, $body, $signature);
+    $verifiedId = $this->config->webhookEvents()->sole()->id;
+
+    foreach (range(1, InfisicalWebhookEvent::KEEP_PER_CONFIG * 2) as $ignored) {
+        postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, 'wrong-secret'));
+    }
+
+    expect(InfisicalWebhookEvent::find($verifiedId))->not->toBeNull()
+        ->and($this->config->webhookEvents()->count())->toBe(2);
+});
+
+it('keeps only the newest verified entries per configuration', function () {
     InfisicalWebhookEvent::factory()
         ->count(InfisicalWebhookEvent::KEEP_PER_CONFIG + 5)
         ->create(['infisical_sync_config_id' => $this->config->id]);
@@ -276,6 +324,30 @@ it('keeps only the newest entries per configuration', function () {
         ->toBe(InfisicalWebhookEvent::OUTCOME_QUEUED)
         // ... and pruning one configuration never touches another one's history.
         ->and($kept->fresh())->not->toBeNull();
+});
+
+it('syncs but never redeploys for Infisical\'s own test event', function () {
+    // Infisical's "Test" button sends event "test" with no project block.
+    $body = json_encode(['event' => 'test', 'timestamp' => (int) (microtime(true) * 1000)]);
+
+    postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, $this->webhookSecret))
+        ->assertOk()
+        ->assertJsonPath('status', 'queued');
+
+    Queue::assertPushed(InfisicalSyncJob::class, function (InfisicalSyncJob $job) {
+        return $job->configId === $this->config->id && $job->triggerRedeploy === false;
+    });
+});
+
+it('still redeploys for a real secret change', function () {
+    $body = infisicalBody();
+
+    postInfisicalWebhook($this->config->uuid, $body, infisicalSignature($body, $this->webhookSecret))
+        ->assertOk();
+
+    Queue::assertPushed(InfisicalSyncJob::class, function (InfisicalSyncJob $job) {
+        return $job->triggerRedeploy === true;
+    });
 });
 
 it('deletes the history together with its configuration', function () {
