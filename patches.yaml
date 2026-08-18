@@ -14,3 +14,7 @@ patches:
     type: branch
     ref: patch/infisical-integration
     reason: native Infisical secret sync (pre-deploy sync, webhook/poll redeploy, per-resource config)
+  - id: env-var-delete-guard
+    type: branch
+    ref: patch/env-var-delete-guard
+    reason: compose env-var delete guard matched keys instead of values, blocking deletion of every left-hand name in a compose file
