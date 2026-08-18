@@ -14,6 +14,9 @@ class Infisical extends Controller
     /** Infisical signs with a millisecond timestamp; reject anything older than this. */
     private const MAX_SIGNATURE_AGE_SECONDS = 300;
 
+    /** The event name Infisical's "Test" button sends. */
+    private const TEST_EVENT = 'test';
+
     /**
      * Receive a secret-change notification from Infisical.
      *
@@ -23,14 +26,20 @@ class Infisical extends Controller
      */
     public function events(Request $request, string $uuid)
     {
-        // Everything an unauthenticated caller can observe is decided before the
-        // configuration is looked at, so the endpoint cannot be used to tell which
-        // configuration uuids exist: no signature is always 401, and a well-formed
-        // but wrong signature is always the same generic 200.
+        // Resolved before the signature checks purely so a rejected call can still
+        // be attributed to a configuration in the delivery history — otherwise
+        // "Infisical never called" and "Infisical called and we turned it away"
+        // look identical from the UI. Every response below is still decided
+        // without reference to this lookup, so the endpoint cannot be used to tell
+        // which configuration uuids exist: no signature is always 401, and a
+        // well-formed but wrong signature is always the same generic 200.
+        $config = InfisicalSyncConfig::where('uuid', $uuid)->first();
+
         $signature = $request->header('x-infisical-signature');
 
         if (blank($signature)) {
             auditLogWebhookFailure('infisical', 'signature_missing', ['uuid' => $uuid]);
+            $this->recordEvent($config, InfisicalWebhookEvent::OUTCOME_MALFORMED_SIGNATURE);
 
             return response()->json(['status' => 'unauthorized', 'message' => 'Missing signature.'], 401);
         }
@@ -40,17 +49,17 @@ class Infisical extends Controller
 
         if ($providedHmac === null) {
             auditLogWebhookFailure('infisical', 'invalid_signature_format', ['uuid' => $uuid]);
+            $this->recordEvent($config, InfisicalWebhookEvent::OUTCOME_MALFORMED_SIGNATURE);
 
             return response()->json(['status' => 'unauthorized', 'message' => 'Malformed signature.'], 401);
         }
 
         if ($timestamp !== null && abs(now()->timestamp - intdiv($timestamp, 1000)) > self::MAX_SIGNATURE_AGE_SECONDS) {
             auditLogWebhookFailure('infisical', 'stale_signature', ['uuid' => $uuid]);
+            $this->recordEvent($config, InfisicalWebhookEvent::OUTCOME_STALE_TIMESTAMP);
 
             return response()->json(['status' => 'unauthorized', 'message' => 'Signature timestamp is too old.'], 401);
         }
-
-        $config = InfisicalSyncConfig::where('uuid', $uuid)->first();
 
         if (! $config) {
             return $this->ignored();
@@ -95,11 +104,17 @@ class Infisical extends Controller
             return response()->json(['status' => 'ignored', 'message' => 'Payload does not match this configuration.']);
         }
 
-        InfisicalSyncJob::dispatch($config->id, true);
+        // Infisical's own "Test" button sends event "test". Still sync, so the user
+        // can confirm the connection end to end, but never redeploy the resource
+        // off a test click - that is a production side effect nobody asked for.
+        $isTest = $event === self::TEST_EVENT;
+
+        InfisicalSyncJob::dispatch($config->id, ! $isTest);
 
         auditLog('webhook.infisical.sync_queued', [
             'infisical_sync_config_uuid' => $config->uuid,
             'event' => $event,
+            'redeploy' => ! $isTest,
         ]);
         $this->recordEvent($config, InfisicalWebhookEvent::OUTCOME_QUEUED, $event);
 
