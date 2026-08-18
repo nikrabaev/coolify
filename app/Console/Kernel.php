@@ -9,6 +9,7 @@ use App\Jobs\CheckTraefikVersionJob;
 use App\Jobs\CleanupInstanceStuffsJob;
 use App\Jobs\CleanupOrphanedPreviewContainersJob;
 use App\Jobs\CleanupStaleMultiplexedConnections;
+use App\Jobs\InfisicalPollingManager;
 use App\Jobs\PullChangelog;
 use App\Jobs\PullTemplatesFromCDN;
 use App\Jobs\RegenerateSslCertJob;
@@ -92,6 +93,9 @@ class Kernel extends ConsoleKernel
             // Cleanup orphaned PR preview containers daily
             $this->scheduleInstance->job(new CleanupOrphanedPreviewContainersJob)->daily()->onOneServer();
         }
+
+        // Infisical secret polling (dev and production alike)
+        $this->scheduleInstance->job(new InfisicalPollingManager)->everyMinute()->onOneServer();
     }
 
     private function pullImages(): void
