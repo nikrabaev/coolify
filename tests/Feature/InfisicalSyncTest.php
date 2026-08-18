@@ -54,6 +54,29 @@ function fakeInfisicalSecrets(array $secrets, array $imports = []): void
     ];
 }
 
+/**
+ * Set what the secrets endpoint returns, folder by folder.
+ *
+ * @param  array<string, array<string, string>>  $byPath  path => (key => value)
+ */
+function fakeInfisicalSecretsAtPaths(array $byPath, array $imports = []): void
+{
+    $secrets = [];
+
+    foreach ($byPath as $path => $pairs) {
+        foreach ($pairs as $key => $value) {
+            $secrets[] = [
+                'secretKey' => $key,
+                'secretValue' => $value,
+                'type' => 'shared',
+                'secretPath' => $path,
+            ];
+        }
+    }
+
+    test()->infisicalPayload = ['secrets' => $secrets, 'imports' => $imports];
+}
+
 function infisicalSyncApplication(): Application
 {
     $application = Application::factory()->create(['environment_id' => test()->environment->id]);
@@ -460,4 +483,140 @@ it('writes a sync report without leaking secret values', function () {
     expect(json_encode($config->last_sync_report))->not->toContain('super-secret-value');
     expect($config->last_applied_hash)->not->toBeEmpty();
     expect($config->last_synced_at)->not->toBeNull();
+});
+
+it('gives each mapped folder its own prefix so equal keys stop colliding', function () {
+    fakeInfisicalSecretsAtPaths([
+        '/services/api' => ['DB_URL' => 'api-db'],
+        '/services/worker' => ['DB_URL' => 'worker-db'],
+    ]);
+    $service = infisicalSyncService();
+    $config = infisicalSyncConfigFor($service, [
+        'secret_path' => '/services',
+        'recursive' => true,
+        'path_prefix_map' => ['/services/api' => 'API_', '/services/worker' => 'WORKER_'],
+    ]);
+
+    $result = SyncInfisicalSecrets::run($config);
+
+    expect($result['collisions'])->toBe([]);
+    expect($service->environment_variables()->pluck('value', 'key')->sortKeys()->all())->toBe([
+        'API_DB_URL' => 'api-db',
+        'WORKER_DB_URL' => 'worker-db',
+    ]);
+});
+
+it('applies a mapping to every folder below it and lets the deepest mapping win', function () {
+    fakeInfisicalSecretsAtPaths([
+        '/services' => ['SHARED' => 'top'],
+        '/services/api' => ['TOKEN' => 'api-token'],
+        '/services/api/v2' => ['TOKEN' => 'v2-token'],
+    ]);
+    $service = infisicalSyncService();
+    $config = infisicalSyncConfigFor($service, [
+        'secret_path' => '/services',
+        'recursive' => true,
+        'path_prefix_map' => ['/services' => 'SVC_', '/services/api/v2' => 'V2_'],
+    ]);
+
+    $result = SyncInfisicalSecrets::run($config);
+
+    expect($result['collisions'])->toBe([]);
+    expect($service->environment_variables()->pluck('value', 'key')->sortKeys()->all())->toBe([
+        'SVC_SHARED' => 'top',
+        'SVC_TOKEN' => 'api-token',
+        'V2_TOKEN' => 'v2-token',
+    ]);
+});
+
+it('does not let a mapping leak into a sibling folder with the same name prefix', function () {
+    fakeInfisicalSecretsAtPaths([
+        '/services' => ['ONE' => 'mapped'],
+        '/services-old' => ['TWO' => 'not-mapped'],
+    ]);
+    $service = infisicalSyncService();
+    $config = infisicalSyncConfigFor($service, [
+        'recursive' => true,
+        'path_prefix_map' => ['/services' => 'SVC_'],
+    ]);
+
+    SyncInfisicalSecrets::run($config);
+
+    expect($service->environment_variables()->pluck('value', 'key')->sortKeys()->all())->toBe([
+        'SVC_ONE' => 'mapped',
+        'TWO' => 'not-mapped',
+    ]);
+});
+
+it('lets an empty prefix opt a subfolder out of its parent mapping', function () {
+    fakeInfisicalSecretsAtPaths([
+        '/app' => ['ONE' => 'one'],
+        '/app/plain' => ['TWO' => 'two'],
+    ]);
+    $service = infisicalSyncService();
+    $config = infisicalSyncConfigFor($service, [
+        'recursive' => true,
+        'path_prefix_map' => ['/app' => 'APP_', '/app/plain' => ''],
+    ]);
+
+    SyncInfisicalSecrets::run($config);
+
+    expect($service->environment_variables()->pluck('value', 'key')->sortKeys()->all())->toBe([
+        'APP_ONE' => 'one',
+        'TWO' => 'two',
+    ]);
+});
+
+it('keeps the flat behaviour and the collision report for unmapped folders', function () {
+    fakeInfisicalSecretsAtPaths([
+        '/app/one' => ['DUPE' => 'deeper-loses'],
+        '/app' => ['DUPE' => 'shallower-wins'],
+    ]);
+    $service = infisicalSyncService();
+    $config = infisicalSyncConfigFor($service, ['recursive' => true]);
+
+    $result = SyncInfisicalSecrets::run($config);
+
+    expect($result['collisions'])->toBe(['DUPE']);
+    expect($service->environment_variables()->pluck('value', 'key')->all())->toBe(['DUPE' => 'shallower-wins']);
+});
+
+it('prefixes imported secrets by the folder they are imported from', function () {
+    fakeInfisicalSecretsAtPaths(['/app' => ['OWN' => 'own']], [
+        [
+            'secretPath' => '/common',
+            'environment' => 'prod',
+            'secrets' => [['secretKey' => 'SHARED', 'secretValue' => 'from-common', 'type' => 'shared']],
+        ],
+    ]);
+    $service = infisicalSyncService();
+    $config = infisicalSyncConfigFor($service, [
+        'recursive' => true,
+        'path_prefix_map' => ['/common' => 'COMMON_', '/app' => 'APP_'],
+    ]);
+
+    SyncInfisicalSecrets::run($config);
+
+    expect($service->environment_variables()->pluck('value', 'key')->sortKeys()->all())->toBe([
+        'APP_OWN' => 'own',
+        'COMMON_SHARED' => 'from-common',
+    ]);
+});
+
+it('renames managed variables when a prefix changes', function () {
+    fakeInfisicalSecretsAtPaths(['/app' => ['TOKEN' => 'value']]);
+    $service = infisicalSyncService();
+    $config = infisicalSyncConfigFor($service, [
+        'recursive' => true,
+        'path_prefix_map' => ['/app' => 'OLD_'],
+    ]);
+
+    SyncInfisicalSecrets::run($config);
+    expect($service->environment_variables()->pluck('key')->all())->toBe(['OLD_TOKEN']);
+
+    $config->update(['path_prefix_map' => ['/app' => 'NEW_']]);
+    $result = SyncInfisicalSecrets::run($config->refresh());
+
+    expect($result['changed'])->toBeTrue();
+    expect($service->environment_variables()->pluck('key')->all())->toBe(['NEW_TOKEN']);
 });
