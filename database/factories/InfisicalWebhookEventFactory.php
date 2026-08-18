@@ -24,6 +24,7 @@ class InfisicalWebhookEventFactory extends Factory
             'infisical_sync_config_id' => InfisicalSyncConfig::factory(),
             'outcome' => InfisicalWebhookEvent::OUTCOME_QUEUED,
             'event' => 'secrets.modified',
+            'occurrences' => 1,
         ];
     }
 }
