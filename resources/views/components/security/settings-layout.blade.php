@@ -22,7 +22,7 @@
             'label' => 'Infisical',
             'route' => 'security.infisical',
             'active' => request()->routeIs('security.infisical*'),
-            'icon' => 'keys',
+            'icon' => 'infisical',
         ] : null,
         [
             'label' => 'API Tokens',
