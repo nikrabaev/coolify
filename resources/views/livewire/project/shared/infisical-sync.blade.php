@@ -123,7 +123,12 @@
                         helper="Infisical signs its webhook calls with this secret. Leave empty to disable the webhook."
                         canGate="manageEnvironment" :canResource="$resource">
                         <x-slot:labelSuffix>
-                            <button type="button" wire:click="generateWebhookSecret"
+                            {{-- Generated client-side with a deferred $wire.set: a server action
+                                 would fold the new value into the Livewire snapshot, so wire:dirty
+                                 never fires and the unsaved-changes bar would not appear. --}}
+                            <button type="button"
+                                x-on:click="$wire.set('webhook_secret', Array.from(crypto.getRandomValues(new Uint8Array(20)), (byte) => byte.toString(16).padStart(2, '0')).join(''), false);
+                                    Livewire.dispatch('success', ['A new webhook secret was generated. Save the configuration to store it.'])"
                                 class="text-[11px] font-medium text-coollabs hover:underline dark:text-warning">
                                 Generate
                             </button>
@@ -149,6 +154,11 @@
     </form>
 
     @if ($config)
+        <x-application.settings-section id="infisical-webhook-history-section" title="Webhook deliveries"
+            helper="Every call Infisical made to this resource's webhook URL, newest first.">
+            <livewire:project.shared.infisical-webhook-events :resource="$resource" />
+        </x-application.settings-section>
+
         <x-application.settings-section id="infisical-status-section" title="Last sync"
             helper="What the most recent sync did and which keys it could not apply.">
             <x-slot:actions>
