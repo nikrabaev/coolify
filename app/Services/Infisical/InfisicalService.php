@@ -4,6 +4,7 @@ namespace App\Services\Infisical;
 
 use App\Exceptions\InfisicalException;
 use App\Models\InfisicalIntegration;
+use App\Models\InfisicalSyncConfig;
 use App\Rules\SafeWebhookUrl;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -63,11 +64,16 @@ class InfisicalService
      * entries in the imports array win, matching the bottom-most-import rule),
      * then secrets defined directly at the path, which override everything.
      *
+     * @param  array<string, string>  $pathPrefixMap  Folder path => key prefix. Applied
+     *                                                before keys are merged, so the same
+     *                                                secret name in two mapped folders
+     *                                                becomes two variables rather than a
+     *                                                collision.
      * @return array{secrets: array<string, string>, collisions: array<int, string>}
      *
      * @throws InfisicalException
      */
-    public function listSecrets(string $projectId, string $environmentSlug, string $secretPath = '/', bool $recursive = false): array
+    public function listSecrets(string $projectId, string $environmentSlug, string $secretPath = '/', bool $recursive = false, array $pathPrefixMap = []): array
     {
         $payload = $this->authenticatedRequest('get', '/api/v3/secrets/raw', [
             // v3 calls the project id `workspaceId`; there is no `projectId` param.
@@ -84,13 +90,17 @@ class InfisicalService
         $collisions = [];
 
         foreach (data_get($payload, 'imports', []) ?? [] as $import) {
+            // An import is prefixed by the mapping of the folder it pulls from,
+            // which is the only path the API reports for it.
+            $importPrefix = InfisicalSyncConfig::prefixForPath($pathPrefixMap, data_get($import, 'secretPath'));
+
             foreach (data_get($import, 'secrets', []) ?? [] as $secret) {
                 $key = data_get($secret, 'secretKey');
                 if (blank($key) || data_get($secret, 'type', 'shared') !== 'shared') {
                     continue;
                 }
                 // Later imports override earlier ones (bottom-most import wins).
-                $secrets[$key] = (string) (data_get($secret, 'secretValue') ?? '');
+                $secrets[$importPrefix.$key] = (string) (data_get($secret, 'secretValue') ?? '');
             }
         }
 
@@ -100,12 +110,15 @@ class InfisicalService
         // report the collision instead of letting array order decide.
         $direct = [];
         foreach (data_get($payload, 'secrets', []) ?? [] as $secret) {
-            $key = data_get($secret, 'secretKey');
-            if (blank($key) || data_get($secret, 'type', 'shared') !== 'shared') {
+            $rawKey = data_get($secret, 'secretKey');
+            if (blank($rawKey) || data_get($secret, 'type', 'shared') !== 'shared') {
                 continue;
             }
 
             $path = (string) (data_get($secret, 'secretPath') ?? $secretPath);
+            // Prefixing happens before the duplicate check below, so two mapped
+            // folders holding the same secret name no longer fight over one key.
+            $key = InfisicalSyncConfig::prefixForPath($pathPrefixMap, $path).$rawKey;
             $candidate = [
                 'value' => (string) (data_get($secret, 'secretValue') ?? ''),
                 'path' => $path,
