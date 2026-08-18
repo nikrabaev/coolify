@@ -99,6 +99,7 @@ class SyncInfisicalSecrets
                 $config->environment_slug,
                 $config->secret_path ?: '/',
                 (bool) $config->recursive,
+                $config->pathPrefixMap(),
             );
         } catch (Throwable $e) {
             throw $e instanceof InfisicalException ? $e : new InfisicalException($e->getMessage(), previous: $e);
