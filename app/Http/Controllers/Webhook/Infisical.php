@@ -125,13 +125,15 @@ class Infisical extends Controller
      * Keep a per-configuration history of received calls so the user can see
      * whether Infisical reaches Coolify. Never allowed to break the webhook.
      */
-    private function recordEvent(InfisicalSyncConfig $config, string $outcome, ?string $event = null): void
+    private function recordEvent(?InfisicalSyncConfig $config, string $outcome, ?string $event = null): void
     {
         try {
+            // Null when the uuid did not resolve: the signature checks run before
+            // that is known, so there is nothing to attribute the call to.
             InfisicalWebhookEvent::record($config, $outcome, $event);
         } catch (Throwable $e) {
             auditLog('webhook.infisical.history_write_failed', [
-                'infisical_sync_config_uuid' => $config->uuid,
+                'infisical_sync_config_uuid' => $config?->uuid,
                 'error' => $e->getMessage(),
             ], 'warning');
         }

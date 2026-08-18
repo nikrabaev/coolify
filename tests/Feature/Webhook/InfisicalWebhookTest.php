@@ -244,9 +244,18 @@ it('records calls that hit a disabled configuration or a missing secret', functi
 it('records nothing at all for an unknown uuid', function () {
     $body = infisicalBody();
 
-    postInfisicalWebhook('does-not-exist', $body, infisicalSignature($body, $this->webhookSecret));
-    postInfisicalWebhook('does-not-exist', $body, null);
-    postInfisicalWebhook('does-not-exist', $body, 'not-a-signature');
+    // Status asserted on every one of these: an unknown uuid combined with a bad
+    // signature is the path where there is no configuration to hand the recorder,
+    // and a 500 here would still leave the event count at zero.
+    postInfisicalWebhook('does-not-exist', $body, infisicalSignature($body, $this->webhookSecret))
+        ->assertOk()
+        ->assertJsonPath('status', 'ignored');
+    postInfisicalWebhook('does-not-exist', $body, null)->assertStatus(401);
+    postInfisicalWebhook('does-not-exist', $body, 'not-a-signature')->assertStatus(401);
+
+    $staleMs = (int) ((microtime(true) - 3600) * 1000);
+    postInfisicalWebhook('does-not-exist', $body, infisicalSignature($body, $this->webhookSecret, $staleMs))
+        ->assertStatus(401);
 
     expect(InfisicalWebhookEvent::count())->toBe(0);
 });
