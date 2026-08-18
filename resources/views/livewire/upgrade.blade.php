@@ -4,8 +4,35 @@
         latestVersion: @js($latestVersion),
         devMode: @js($devMode)
     })">
+    @if ($variant === 'card')
+        <x-application.settings-section title="Update">
+            <x-slot:actions>
+                @if ($isUpgradeAvailable)
+                    <x-forms.button type="button" isHighlighted @click="modalOpen=true" x-show="!showProgress" x-cloak>
+                        Update now
+                    </x-forms.button>
+                    <x-forms.button type="button" @click="modalOpen=true" x-show="showProgress" x-cloak>
+                        Updating
+                    </x-forms.button>
+                @endif
+            </x-slot:actions>
+            <div class="min-w-0">
+                <div class="text-[13px] font-medium text-neutral-900 dark:text-fg">
+                    {{ $isUpgradeAvailable ? 'A new version is available' : 'Coolify is up to date' }}
+                </div>
+                <p class="mt-0.5 text-[12px] leading-4" style="color: var(--coollabs-subtle)">
+                    @if ($isUpgradeAvailable)
+                        {{ $currentVersion }} <span class="mx-0.5">&rarr;</span> {{ $latestVersion }}
+                    @else
+                        Version {{ $currentVersion }}
+                    @endif
+                </p>
+            </div>
+        </x-application.settings-section>
+    @endif
     @if ($isUpgradeAvailable)
         <div :class="{ 'z-40': modalOpen }" class="relative w-auto h-auto">
+            @if ($variant === 'sidebar')
             <button type="button" title="Upgrade in progress" aria-label="Upgrade in progress"
                 @click="modalOpen=true" x-show="showProgress" x-cloak
                 class="inline-flex h-[18px] cursor-pointer items-center rounded-full bg-coollabs/10 px-1.5 text-[9.5px] font-semibold leading-none text-coollabs ring-1 ring-inset ring-coollabs/25 transition-colors hover:bg-coollabs/15 dark:bg-warning/15 dark:text-warning dark:ring-warning/25 dark:hover:bg-warning/20">
@@ -16,6 +43,7 @@
                 class="inline-flex h-[18px] cursor-pointer items-center rounded-full bg-coollabs/10 px-1.5 text-[9.5px] font-semibold leading-none text-coollabs ring-1 ring-inset ring-coollabs/25 transition-colors hover:bg-coollabs/15 dark:bg-warning/15 dark:text-warning dark:ring-warning/25 dark:hover:bg-warning/20">
                 Update available
             </button>
+            @endif
             <template x-teleport="body">
                 <div x-show="modalOpen"
                     class="fixed inset-0 z-99 flex min-h-full items-center justify-center overflow-y-auto p-4"
