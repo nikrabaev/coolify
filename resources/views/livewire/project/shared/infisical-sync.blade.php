@@ -94,6 +94,21 @@
                     helper="Automatically redeploy after a background sync applied a change."
                     canGate="manageEnvironment" :canResource="$resource" />
             </div>
+
+            <div class="mt-4 flex flex-col gap-1.5">
+                <x-forms.textarea id="path_prefix_map" rows="4" monospace label="Subfolder prefixes"
+                    placeholder="/services/api = API_"
+                    helper="One mapping per line, written as /folder = PREFIX_. Only used when subfolders are included."
+                    canGate="manageEnvironment" :canResource="$resource" />
+                <p class="text-[12px] leading-5 text-neutral-600 dark:text-fg-dim">
+                    Without a mapping, a key that exists in several folders is read as one variable and the duplicates
+                    are dropped. Give each folder a prefix and they become separate variables instead:
+                    <code>DB_URL</code> in <code>/services/api</code> is written as <code>API_DB_URL</code>. A mapping
+                    also covers the folders below it, and an empty prefix opts a subfolder back out.
+                    <span class="font-medium text-black dark:text-white">Changing a prefix renames variables</span>, so
+                    update anything that refers to the old names.
+                </p>
+            </div>
         </x-application.settings-section>
 
         <x-application.settings-section id="infisical-triggers-section" title="Automatic triggers"
@@ -185,7 +200,8 @@
                 @if ($collisions->isNotEmpty())
                     <x-callout type="warning" title="Duplicate keys in Infisical">
                         These keys exist more than once in the folders being read, so only one value was used:
-                        {{ $collisions->join(', ') }}.
+                        {{ $collisions->join(', ') }}. Give those folders different subfolder prefixes to keep them
+                        as separate variables.
                     </x-callout>
                 @endif
             </div>
