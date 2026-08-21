@@ -251,3 +251,36 @@ it('denies non-admin members every mutating action', function () {
     expect(InfisicalIntegration::count())->toBe(1)
         ->and($integration->refresh()->client_id)->toBe('stored-client-id');
 });
+
+/**
+ * The edit modal teleports its nested <livewire:security.infisical-integration-form>
+ * into <body>. Livewire's morph reaches teleported content through Alpine
+ * (`from._x_teleport`), and x-modal-input keys its dialog on an `id` built from
+ * uniqid(), so every parent re-render produces a new key and swaps the whole
+ * dialog for freshly parsed server HTML. In that HTML the nested component is a
+ * bare placeholder — Livewire only back-fills placeholders from nodes found
+ * inside the parent's own root element, and the live one lives in <body>. The
+ * result is an empty modal body with dead Alpine handlers (the close button
+ * stops working; only the click-outside handler on the surviving wrapper does).
+ *
+ * wire:ignore keeps the whole subtree out of the morph, which is why the "New
+ * connection" modal above never broke. Do not opt out of it here.
+ */
+it('keeps the edit connection modal out of the Livewire morph', function () {
+    $integration = InfisicalIntegration::factory()->create([
+        'team_id' => $this->team->id,
+        'name' => 'Morph Guard',
+    ]);
+
+    $html = Livewire::test(InfisicalIntegrations::class)->assertOk()->html();
+
+    $anchor = 'wire:key="infisical-integration-edit-'.$integration->uuid.'"';
+    $anchorPosition = strpos($html, $anchor);
+    expect($anchorPosition)->not->toBeFalse('The edit modal for the connection was not rendered.');
+
+    $tagStart = strrpos(substr($html, 0, $anchorPosition), '<div');
+    $tagEnd = strpos($html, '>', $anchorPosition);
+    $openingTag = substr($html, $tagStart, $tagEnd - $tagStart + 1);
+
+    expect($openingTag)->toContain('wire:ignore');
+});
