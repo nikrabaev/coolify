@@ -93,7 +93,11 @@
                             @endcan
 
                             @can('update', $integration)
-                                <x-modal-input title="Edit Infisical Connection" :wireIgnore="false"
+                                {{-- wire:ignore (the x-modal-input default) is load-bearing: the modal
+                                     teleports a nested Livewire component into <body>, and letting the
+                                     morph reach it swaps the dialog for server HTML in which that
+                                     component is an empty placeholder. --}}
+                                <x-modal-input title="Edit Infisical Connection"
                                     wire:key="infisical-integration-edit-{{ $integration->uuid }}">
                                     <x-slot:content>
                                         <button type="button" class="icon-button" title="Edit connection"
