@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Actions\Docker\GetContainersStatus;
+use App\Actions\Infisical\InfisicalDeploymentSync;
 use App\Enums\ApplicationDeploymentStatus;
 use App\Enums\ProcessStatus;
 use App\Events\ApplicationConfigurationChanged;
@@ -317,6 +318,7 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
             return;
         }
         try {
+            InfisicalDeploymentSync::run($this->application, $this->application_deployment_queue);
             // Make sure the private key is stored in the filesystem
             $this->server->privateKey->storeInFileSystem();
             // Generate custom host<->ip mapping
