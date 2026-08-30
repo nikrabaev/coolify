@@ -18,6 +18,10 @@ patches:
     type: branch
     ref: patch/env-var-delete-guard
     reason: compose env-var delete guard matched keys instead of values, blocking deletion of every left-hand name in a compose file
+  - id: helper-container-cleanup
+    type: branch
+    ref: patch/helper-container-cleanup
+    reason: timed-out/cancelled deployments orphaned the coolify-helper build container, which kept building forever (CPU/RAM/disk exhaustion; observed 8-day-old helper)
   - id: upgrade-restart-completion
     type: branch
     ref: patch/upgrade-restart-completion
