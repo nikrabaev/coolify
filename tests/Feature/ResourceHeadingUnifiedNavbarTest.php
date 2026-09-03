@@ -409,7 +409,7 @@ it('groups application automation pages separately from build and deploy', funct
     $sidebar = file_get_contents(resource_path('views/components/application/configuration-sidebar.blade.php'));
 
     expect($sidebar)
-        ->toContain("'Settings' => ['General', 'Domains', 'Environment Variables', 'Persistent Storage', 'Advanced', 'Swarm', 'Healthcheck']")
+        ->toContain("'Settings' => ['General', 'Domains', 'Environment Variables', 'Infisical', 'Persistent Storage', 'Advanced', 'Swarm', 'Healthcheck']")
         ->toContain("'Deploy' => ['Git Source', 'Servers', 'Preview Deployments']")
         ->toContain("'Automation' => ['Scheduled Tasks', 'Webhooks', 'Backups']")
         ->toContain("'Operations' => ['Resource Operations', 'Resource Limits', 'Rollback'");

@@ -127,6 +127,18 @@ it('keeps mutable Livewire components behind authorization checks', function (st
         'app/Livewire/Project/Shared/Terminal.php',
         ['AuthorizesRequests', "authorize('view'", "authorize('canAccessTerminal'"],
     ],
+    'infisical sync tab' => [
+        'app/Livewire/Project/Shared/InfisicalSync.php',
+        ['AuthorizesRequests', "authorize('view'", "authorize('manageEnvironment'"],
+    ],
+    'infisical integrations list' => [
+        'app/Livewire/Security/InfisicalIntegrations.php',
+        ['AuthorizesRequests', "authorize('viewAny'", "authorize('validateConnection'", "authorize('delete'"],
+    ],
+    'infisical integration form' => [
+        'app/Livewire/Security/InfisicalIntegrationForm.php',
+        ['AuthorizesRequests', "authorize('create'", "authorize('update'"],
+    ],
 ]);
 
 it('authorizes every volume backup form control', function (string $path, array $controlPatterns) {
