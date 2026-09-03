@@ -410,8 +410,10 @@ class ApplicationDeploymentJob implements ShouldBeEncrypted, ShouldQueue
             }
 
             try {
-                $this->application_deployment_queue->addLogEntry("Gracefully shutting down build container: {$this->deployment_uuid}");
-                $this->graceful_shutdown_container($this->deployment_uuid, skipRemove: true);
+                $this->application_deployment_queue->addLogEntry("Removing build container: {$this->deployment_uuid}");
+                // Use instant_remote_process directly: execute_remote_command refuses to run
+                // once the deployment is cancelled, which left the helper container running.
+                instant_remote_process(["docker rm -f {$this->deployment_uuid}"], $this->server, throwError: false);
             } catch (Exception $e) {
                 // Log but don't fail - container cleanup errors are expected when container is already gone
                 \Log::warning('Failed to shutdown container '.$this->deployment_uuid.': '.$e->getMessage());
@@ -5202,6 +5204,15 @@ COPY ./nginx.conf /etc/nginx/conf.d/default.conf");
 
     public function failed(Throwable $exception): void
     {
+        // On a job timeout the worker never reaches handle()'s finally block, which
+        // orphans the helper container: it keeps building on the server indefinitely.
+        try {
+            $buildServer = $this->use_build_server ? $this->build_server : $this->server;
+            instant_remote_process(["docker rm -f {$this->deployment_uuid}"], $buildServer, throwError: false);
+        } catch (Throwable $e) {
+            \Log::warning('Failed to remove build container '.$this->deployment_uuid.': '.$e->getMessage());
+        }
+
         $this->failDeployment();
 
         // Log comprehensive error information
