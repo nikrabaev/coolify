@@ -26,3 +26,7 @@ patches:
     type: branch
     ref: patch/upgrade-restart-completion
     reason: upgrade modal hung on the restart step; the running version was read from the browser's Livewire snapshot, so it never reached the target and the status file was already deleted by the time the new container answered
+  - id: log-parser
+    type: branch
+    ref: patch/log-parser
+    reason: structured container log parsing — team presets (JSON DSL + optional JS hook) render log lines as collapsible entries with level badges and pretty JSON; unmatched lines stay raw
