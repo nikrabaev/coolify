@@ -17,6 +17,7 @@ use App\Models\StandaloneMysql;
 use App\Models\StandalonePostgresql;
 use App\Models\StandaloneRedis;
 use App\Support\ValidationPatterns;
+use App\Traits\HasLogParserPreset;
 use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
 use Illuminate\Support\Facades\Process;
 use Livewire\Attributes\Locked;
@@ -24,7 +25,7 @@ use Livewire\Component;
 
 class GetLogs extends Component
 {
-    use AuthorizesRequests;
+    use AuthorizesRequests, HasLogParserPreset;
 
     public const MAX_LOG_LINES = 50000;
 
