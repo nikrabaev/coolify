@@ -11,6 +11,7 @@
         ['label' => 'General', 'route' => 'project.service.configuration', 'icon' => 'settings'],
         ['label' => 'Domains', 'route' => 'project.service.domains', 'icon' => 'globe'],
         ['label' => 'Environment Variables', 'route' => 'project.service.environment-variables', 'icon' => 'variables', 'hasWarning' => ! $service->isDeployable],
+        ['label' => 'Infisical', 'route' => 'project.service.infisical', 'icon' => 'infisical'],
         ['label' => 'Persistent Storage', 'route' => 'project.service.storages', 'icon' => 'storages'],
         ['label' => 'Backups', 'route' => 'project.service.volume-backups.index', 'icon' => 'database'],
         ['label' => 'Import Backup', 'route' => 'project.service.import-backup', 'icon' => 'upload', 'navigate' => false],
@@ -34,7 +35,7 @@
         ]);
 
     $menuGroups = [
-        'Settings' => ['General', 'Domains', 'Environment Variables', 'Persistent Storage'],
+        'Settings' => ['General', 'Domains', 'Environment Variables', 'Infisical', 'Persistent Storage'],
         'Observe & troubleshoot' => ['Runtime Logs', 'Terminal'],
         'Automation' => ['Scheduled Tasks', 'Webhooks', 'Backups', 'Import Backup'],
         'Operations' => ['Resource Operations', 'Tags', 'Danger Zone'],
