@@ -1,5 +1,6 @@
 import { initializeTerminalComponent } from './terminal.js';
 import { registerLivewireRequestFailureHandler } from './livewire-request-failure.js';
+import './log-parser/index.js';
 
 document.addEventListener('livewire:init', () => {
     registerLivewireRequestFailureHandler(window.Livewire);
