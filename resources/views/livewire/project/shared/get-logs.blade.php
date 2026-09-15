@@ -135,7 +135,7 @@
             const lines = logs.querySelectorAll('[data-log-line]');
             lines.forEach(line => {
                 const content = (line.dataset.logContent || '').toLowerCase();
-                const level = this.getLogLevel(content);
+                const level = line.dataset.lpLevel || this.getLogLevel(content);
                 line.dataset.logLevel = level;
                 line.classList.remove('log-error', 'log-warning', 'log-debug', 'log-info');
                 if (!this.colorLogs) return;
@@ -182,6 +182,7 @@
             });
 
             this.matchCount = query ? count : 0;
+            window.CoolifyLogParser?.afterSearch(logs, query);
         },
         highlightText(el, text, query) {
             // Skip if user has selection
@@ -214,7 +215,7 @@
             const visibleLines = logs.querySelectorAll('[data-log-line]:not(.hidden)');
             let content = '';
             visibleLines.forEach(line => {
-                const text = line.textContent.replace(/\s+/g, ' ').trim();
+                const text = (window.CoolifyLogParser?.exportLine(line) ?? line.textContent).replace(/\s+/g, ' ').trim();
                 if (text) {
                     content += text + String.fromCharCode(10);
                 }
@@ -453,6 +454,7 @@
                                         </button>
                                     </div>
                             </x-table.dropdown>
+                            @include('livewire.project.shared.partials.log-parser-menu')
                             <button title="Follow Logs" :class="alwaysScroll ? 'runtime-log-icon-button-active' : ''"
                                 x-on:click="toggleScroll"
                                 class="runtime-log-icon-button order-2">
@@ -517,7 +519,7 @@
                             $displayLines = collect(explode("\n", $outputs))->filter(fn($line) => trim($line) !== '');
                             $lineOccurrences = [];
                         @endphp
-                        <div id="logs" class="font-logs max-w-full cursor-default text-[11px] leading-relaxed sm:text-xs">
+                        <div id="logs" data-log-parser="{{ $this->logParserConfigJson() }}" class="font-logs max-w-full cursor-default text-[11px] leading-relaxed sm:text-xs">
                             <div x-show="searchQuery.trim() && matchCount === 0"
                                 class="py-2 text-gray-500 dark:text-gray-400">
                                 No matches found.
