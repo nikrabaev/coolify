@@ -73,6 +73,7 @@ class EnvironmentVariable extends BaseModel
         'is_preview' => 'boolean',
         'is_runtime' => 'boolean',
         'is_buildtime' => 'boolean',
+        'is_managed_by_infisical' => 'boolean',
         'version' => 'string',
         'resourceable_type' => 'string',
         'resourceable_id' => 'integer',
@@ -103,7 +104,7 @@ class EnvironmentVariable extends BaseModel
                 if (! $found) {
                     $application = Application::find($environment_variable->resourceable_id);
                     if ($application) {
-                        ModelsEnvironmentVariable::create([
+                        $preview = new ModelsEnvironmentVariable([
                             'key' => $environment_variable->key,
                             'value' => $environment_variable->value,
                             'is_multiline' => $environment_variable->is_multiline ?? false,
@@ -115,6 +116,11 @@ class EnvironmentVariable extends BaseModel
                             'resourceable_id' => $environment_variable->resourceable_id,
                             'is_preview' => true,
                         ]);
+                        // Deliberately not mass-assignable: the API env endpoints pass
+                        // request data straight into updateOrCreate, so a fillable flag
+                        // would let a caller mark their own variable Infisical-managed.
+                        $preview->is_managed_by_infisical = $environment_variable->is_managed_by_infisical ?? false;
+                        $preview->save();
                     }
                 }
             }
