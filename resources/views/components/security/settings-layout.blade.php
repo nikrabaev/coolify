@@ -30,6 +30,12 @@
             'active' => request()->routeIs('security.api-tokens'),
             'icon' => 'code',
         ],
+        auth()->user()?->can('viewAny', App\Models\LogParserPreset::class) ? [
+            'label' => 'Log Parsers',
+            'route' => 'security.log-parsers',
+            'active' => request()->routeIs('security.log-parsers*'),
+            'icon' => 'terminal',
+        ] : null,
     ])->filter();
 @endphp
 
