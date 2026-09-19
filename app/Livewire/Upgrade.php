@@ -91,6 +91,26 @@ class Upgrade extends Component
             return ['status' => 'none'];
         }
 
+        // The version of the code answering THIS request, never the value hydrated
+        // from the browser's snapshot: after the restart the snapshot still carries
+        // the pre-upgrade version, so the target could never be reached.
+        $runningVersion = (string) config('constants.coolify.version');
+        $targetVersion = $this->latestVersion !== '' ? $this->latestVersion : get_latest_version_of_coolify();
+
+        // Answering at all proves the new container is serving. Do not wait for the
+        // status file to say so: upgrade.sh removes it 10 seconds after writing
+        // step 6, which routinely elapses before the fresh container finishes
+        // booting, leaving the client polling a file that no longer exists.
+        if (CoolifyUpgradeStatus::hasReachedTargetVersion($runningVersion, $targetVersion)) {
+            return [
+                'status' => 'complete',
+                'step' => 6,
+                'message' => "Successfully upgraded to {$targetVersion}",
+                'running_version' => $runningVersion,
+                'target_version' => $targetVersion,
+            ];
+        }
+
         $server = Server::find(0);
         if (! $server) {
             return ['status' => 'none'];
@@ -111,8 +131,8 @@ class Upgrade extends Component
 
         return CoolifyUpgradeStatus::fromFile(
             content: $content,
-            runningVersion: $this->currentVersion !== '' ? $this->currentVersion : (string) config('constants.coolify.version'),
-            targetVersion: $this->latestVersion !== '' ? $this->latestVersion : get_latest_version_of_coolify(),
+            runningVersion: $runningVersion,
+            targetVersion: $targetVersion,
         );
     }
 }
