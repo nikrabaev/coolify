@@ -1,0 +1,154 @@
+/* Fork patch "log-parser": structured log entries (resources/js/log-parser). */
+
+/* Parsed line grid: [meta] [message] [▸ preview filling the rest]; timestamp and
+   details span every column. :not(.hidden) keeps the level filter's display:none. */
+.logs-viewer-line.lp-parsed:not(.hidden) {
+    display: grid;
+    grid-template-columns: auto minmax(0, max-content) minmax(3ch, 1fr);
+    align-items: baseline;
+    column-gap: 0.5rem;
+}
+
+.lp-parsed > .logs-viewer-timestamp,
+.lp-parsed > .lp-json {
+    grid-column: 1 / -1;
+}
+
+.lp-parsed > .lp-meta {
+    grid-column: 1;
+}
+
+.lp-parsed > .logs-viewer-line-text {
+    grid-column: 2;
+}
+
+.lp-parsed > .lp-toggle {
+    grid-column: 3;
+}
+
+@media (max-width: 639px) {
+    .logs-viewer-line.lp-parsed:not(.hidden) {
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .lp-parsed > .lp-toggle {
+        grid-column: 1 / -1;
+    }
+}
+
+.lp-has-details {
+    cursor: pointer;
+}
+
+.lp-meta {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.375rem;
+}
+
+.lp-time,
+.lp-field {
+    color: #737373;
+}
+
+.lp-badge {
+    display: inline-block;
+    min-width: 3.25rem;
+    padding: 0 0.3rem;
+    border-radius: 0.25rem;
+    font-size: 0.625rem;
+    font-weight: 600;
+    line-height: 1rem;
+    letter-spacing: 0.02em;
+    text-align: center;
+}
+
+.lp-badge-error { color: #b91c1c; background: rgb(239 68 68 / 0.15); }
+.lp-badge-warning { color: #a16207; background: rgb(234 179 8 / 0.18); }
+.lp-badge-debug { color: #7e22ce; background: rgb(168 85 247 / 0.15); }
+.lp-badge-info { color: #1d4ed8; background: rgb(59 130 246 / 0.15); }
+
+.dark .lp-badge-error { color: #fca5a5; background: rgb(239 68 68 / 0.22); }
+.dark .lp-badge-warning { color: #fde047; background: rgb(234 179 8 / 0.2); }
+.dark .lp-badge-debug { color: #d8b4fe; background: rgb(168 85 247 / 0.22); }
+.dark .lp-badge-info { color: #93c5fd; background: rgb(59 130 246 / 0.22); }
+
+.lp-toggle {
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
+    gap: 0.25rem;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: #a3a3a3;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.lp-toggle:hover,
+.lp-toggle:focus-visible {
+    color: inherit;
+}
+
+.lp-chevron {
+    display: inline-block;
+    transition: transform 100ms ease;
+}
+
+.lp-open .lp-chevron {
+    transform: rotate(90deg);
+}
+
+.lp-preview {
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.lp-open .lp-preview {
+    visibility: hidden;
+}
+
+.lp-match-details .lp-chevron,
+.lp-match-details .lp-preview {
+    background: rgb(252 211 77 / 0.35);
+    color: inherit;
+}
+
+.lp-json {
+    display: block;
+    margin: 0.25rem 0 0.375rem 0.75rem;
+    padding: 0.375rem 0.75rem;
+    border-left: 2px solid rgb(115 115 115 / 0.35);
+    background: rgb(0 0 0 / 0.03);
+    font: inherit;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    tab-size: 2;
+    cursor: text;
+}
+
+.dark .lp-json {
+    background: rgb(255 255 255 / 0.03);
+}
+
+.json-key { color: #0369a1; }
+.json-string { color: #15803d; }
+.json-number { color: #c2410c; }
+.json-bool { color: #7e22ce; }
+.json-null,
+.json-ellipsis { color: #737373; font-style: italic; }
+
+.dark .json-key { color: #7dd3fc; }
+.dark .json-string { color: #86efac; }
+.dark .json-number { color: #fdba74; }
+.dark .json-bool { color: #d8b4fe; }
+
+.lp-preview-logs {
+    font-family: var(--font-logs, ui-monospace, monospace);
+    font-size: 0.75rem;
+    line-height: 1.625;
+}
