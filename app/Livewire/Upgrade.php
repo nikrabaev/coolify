@@ -20,6 +20,8 @@ class Upgrade extends Component
 
     public bool $devMode = false;
 
+    public bool $fullButton = false;
+
     protected $listeners = ['updateAvailable' => 'checkUpdate'];
 
     public function mount()
@@ -49,6 +51,13 @@ class Upgrade extends Component
         }
 
         $settings = InstanceSettings::find(0);
+        if (data_get($settings, 'update_channel') === 'custom') {
+            $this->latestVersion = (string) $settings->update_custom_tag;
+            $this->isUpgradeAvailable = $this->fullButton && $this->latestVersion !== '';
+
+            return;
+        }
+
         $hasNewerVersion = version_compare($this->latestVersion, $this->currentVersion, '>');
         $newVersionAvailable = (bool) data_get($settings, 'new_version_available', false);
 
@@ -75,8 +84,20 @@ class Upgrade extends Component
                     UpdateCoolify::run(manual_update: true);
                 } catch (\Throwable $e) {
                     report($e);
+                    try {
+                        CoolifyUpgradeStatus::writeError(Server::findOrFail(0), $e->getMessage());
+                    } catch (\Throwable $statusException) {
+                        report($statusException);
+                    }
                 }
             })->afterResponse();
+
+            auditLog('ui.instance.upgrade_started', [
+                'team_id' => null,
+                'resource' => 'instance',
+                'from_version' => config('constants.coolify.version'),
+                'to_version' => $this->latestVersion,
+            ]);
         } catch (\Throwable $e) {
             return handleError($e, $this);
         }
@@ -114,7 +135,7 @@ class Upgrade extends Component
             return ['status' => 'none'];
         }
 
-        $statusFile = '/data/coolify/source/.upgrade-status';
+        $statusFile = CoolifyUpgradeStatus::FILE;
 
         try {
             $content = instant_remote_process(

@@ -9,10 +9,22 @@
         'Deployments' => [
             ['key' => 'deploymentSuccess', 'label' => 'Deployment success'],
             ['key' => 'deploymentFailure', 'label' => 'Deployment failure'],
+        ],
+        'Resources' => [
             [
                 'key' => 'statusChange',
-                'label' => 'Container status changes',
-                'helper' => 'Notify when a container stops or restarts.',
+                'label' => 'Resource status changes',
+                'helper' => 'Notify when a resource stops unexpectedly (for example a crash) or Coolify automatically restarts it. Stops from Coolify send no notification.',
+            ],
+            [
+                'key' => 'restartLimitReached',
+                'label' => 'Restart limit reached',
+                'helper' => 'Notify when a resource is stopped after reaching its restart limit.',
+            ],
+            [
+                'key' => 'imageVulnerabilities',
+                'label' => 'Image vulnerabilities',
+                'helper' => 'A daily summary of new vulnerabilities with a fix, and an alert for known exploited ones.',
             ],
         ],
         'Backups' => [

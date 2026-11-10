@@ -1,5 +1,6 @@
 @props([
     'closeWithX' => false,
+    'mobileFullscreen' => false,
     'open' => false,
     'size' => 'lg',
 ])
@@ -40,7 +41,11 @@
 
             <div class="fixed inset-0 overflow-y-auto">
                 <div @if (! $closeWithX) @click.self="processDialogOpen = false" @endif
-                    class="flex min-h-full items-center justify-center p-4 sm:p-6">
+                    @class([
+                        'flex min-h-full items-center justify-center',
+                        'p-4 sm:p-6' => ! $mobileFullscreen,
+                        'p-0 sm:p-6' => $mobileFullscreen,
+                    ])>
                     <div x-show="processDialogOpen"
                         x-trap.inert.noscroll="processDialogOpen"
                         x-transition:enter="ease-out duration-150"
@@ -54,15 +59,25 @@
                         aria-labelledby="process-dialog-title"
                         @class([
                             'application-settings-section application-settings-form process-dialog relative flex flex-col overflow-hidden',
+                            'process-dialog-mobile-fullscreen' => $mobileFullscreen,
                             $panelWidth,
                             // Fixed shell size so empty “waiting for process” state does not collapse.
                             'min-h-[min(70dvh,28rem)] h-[min(85dvh,52rem)] max-h-[calc(100dvh-2rem)]',
                         ])
                         style="box-shadow: 0 0 0 1px var(--coollabs-hairline), var(--shadow-modal)">
                         <header class="flex-nowrap!">
-                            <h3 id="process-dialog-title" class="min-w-0 flex-1 truncate">
-                                {{ $title }}
-                            </h3>
+                            <div class="flex min-w-0 flex-1 items-center gap-2">
+                                <h3 id="process-dialog-title" class="min-w-0 truncate">
+                                    {{ $title }}
+                                </h3>
+                                <x-loading compact class="process-dialog-status process-dialog-status-running text-accent!" />
+                                <span class="process-dialog-status process-dialog-status-finished items-center gap-1.5 text-xs text-neutral-500 dark:text-fg-dim" role="status">
+                                    <span class="size-2 rounded-full bg-success"></span>Finished
+                                </span>
+                                <span class="process-dialog-status process-dialog-status-failed items-center gap-1.5 text-xs text-neutral-500 dark:text-fg-dim" role="status">
+                                    <span class="size-2 rounded-full bg-error"></span>Failed
+                                </span>
+                            </div>
                             <button type="button" @click="processDialogOpen = false"
                                 class="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-neutral-500 outline-0 transition-colors hover:bg-neutral-100 hover:text-black focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent dark:text-fg-faint dark:hover:bg-white/[0.06] dark:hover:text-fg"
                                 aria-label="Close">
@@ -70,8 +85,7 @@
                             </button>
                         </header>
 
-                        <div class="application-settings-section-body process-dialog-body flex min-h-0 flex-1 flex-col overflow-hidden p-3 sm:p-4"
-                            style="-webkit-overflow-scrolling: touch;">
+                        <div class="application-settings-section-body process-dialog-body flex min-h-0 flex-1 flex-col overflow-hidden p-3 sm:p-4">
                             {{ $content }}
                         </div>
                     </div>

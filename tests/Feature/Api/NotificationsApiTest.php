@@ -9,6 +9,7 @@ use App\Models\Team;
 use App\Models\TelegramNotificationSettings;
 use App\Models\User;
 use App\Models\WebhookNotificationSettings;
+use App\Rules\SafeWebhookUrl;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Once;
 
@@ -35,6 +36,13 @@ beforeEach(function () {
 
     $this->token = $this->user->createToken('test-token', ['*']);
     $this->bearerToken = $this->token->plainTextToken;
+
+    // Webhook URLs and the SMTP host are resolved during validation: answer without DNS.
+    SafeWebhookUrl::resolveHostsUsing(fn (): array => ['93.184.216.34']);
+});
+
+afterEach(function () {
+    SafeWebhookUrl::resolveHostsUsing(null);
 });
 
 function authHeaders(string $token): array
@@ -59,6 +67,7 @@ describe('GET /api/v1/notifications/*', function () {
         $response->assertJsonStructure([
             'team_id',
             'smtp_enabled',
+            'smtp_ehlo_domain',
             'deployment_failure_email_notifications',
             'use_instance_email_settings',
         ]);
@@ -171,6 +180,7 @@ describe('PATCH /api/v1/notifications/*', function () {
                 'smtp_enabled' => true,
                 'smtp_from_address' => 'alerts@example.com',
                 'smtp_host' => 'smtp.example.com',
+                'smtp_ehlo_domain' => 'coolify.example.com',
                 'smtp_port' => 587,
                 'smtp_encryption' => 'starttls',
                 'deployment_failure_email_notifications' => false,
@@ -178,14 +188,65 @@ describe('PATCH /api/v1/notifications/*', function () {
 
         $response->assertSuccessful();
         $response->assertJsonPath('smtp_enabled', true);
+        $response->assertJsonPath('smtp_ehlo_domain', 'coolify.example.com');
         $response->assertJsonPath('deployment_failure_email_notifications', false);
 
         $settings = EmailNotificationSettings::query()->where('team_id', $this->team->id)->first();
         expect($settings->smtp_enabled)->toBeTrue()
             ->and($settings->smtp_from_address)->toBe('alerts@example.com')
             ->and($settings->smtp_host)->toBe('smtp.example.com')
+            ->and($settings->smtp_ehlo_domain)->toBe('coolify.example.com')
             ->and($settings->smtp_port)->toBe(587)
             ->and($settings->deployment_failure_email_notifications)->toBeFalse();
+    });
+
+    test('updates the deployment commit details email setting', function () {
+        $this->withHeaders(authHeaders($this->bearerToken))
+            ->getJson('/api/v1/notifications/email')
+            ->assertSuccessful()
+            ->assertJsonPath('deployment_commit_details_email_notifications', false);
+
+        $this->withHeaders(authHeaders($this->bearerToken))
+            ->patchJson('/api/v1/notifications/email', [
+                'deployment_commit_details_email_notifications' => true,
+            ])
+            ->assertSuccessful()
+            ->assertJsonPath('deployment_commit_details_email_notifications', true);
+
+        expect(EmailNotificationSettings::query()->where('team_id', $this->team->id)->value('deployment_commit_details_email_notifications'))->toBeTruthy();
+    });
+
+    test('validates the deployment commit details email setting', function () {
+        $this->withHeaders(authHeaders($this->bearerToken))
+            ->patchJson('/api/v1/notifications/email', [
+                'deployment_commit_details_email_notifications' => 'not-a-boolean',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('deployment_commit_details_email_notifications');
+    });
+
+    test('validates the smtp ehlo domain', function () {
+        $this->withHeaders(authHeaders($this->bearerToken))
+            ->patchJson('/api/v1/notifications/email', [
+                'smtp_ehlo_domain' => 'not a hostname',
+            ])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('smtp_ehlo_domain');
+    });
+
+    test('clears the smtp ehlo domain', function () {
+        $this->team->emailNotificationSettings->update([
+            'smtp_ehlo_domain' => 'coolify.example.com',
+        ]);
+
+        $this->withHeaders(authHeaders($this->bearerToken))
+            ->patchJson('/api/v1/notifications/email', [
+                'smtp_ehlo_domain' => null,
+            ])
+            ->assertSuccessful()
+            ->assertJsonPath('smtp_ehlo_domain', null);
+
+        expect($this->team->emailNotificationSettings->fresh()->smtp_ehlo_domain)->toBeNull();
     });
 
     test('updates discord notification settings', function () {
